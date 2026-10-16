@@ -1,6 +1,7 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
+import os
 import re
 import asyncio
 import sqlite3
@@ -892,4 +893,4 @@ class FactionPanelView(discord.ui.View):
     async def open_faction_modal(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(FactionModal())
 
-bot.run("MTUzMjE0NzU2ODc3NDIyMjAyNg.G_fJwx.h07uUULc9t7eGx8wuwriLrO6VgvG0Fusov2AXg")
+bot.run(os.getenv('TOKEN'))
