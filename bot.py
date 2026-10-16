@@ -36,6 +36,8 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 
+bot = commands.Bot(command_prefix="!", intents=intents)
+
 # ==================== БАЗА ДАНИХ (SQLite) ====================
 db = sqlite3.connect("bot_database.db", check_same_thread=False)
 cursor = db.cursor()
@@ -236,17 +238,25 @@ class ComplaintModal(discord.ui.Modal):
 
     offender = discord.ui.TextInput(label="Нікнейм або ID порушника", placeholder="Приклад: User#1234 / ID", required=True)
     reason = discord.ui.TextInput(label="Суть порушення", style=discord.TextStyle.paragraph, placeholder="Опишіть ситуацію...", required=True)
-    proofs = discord.ui.TextInput(label="Докази (посилання/Imgr/YouTube)", placeholder="https://...", required=True)
+    proofs = discord.ui.TextInput(label="Докази (посилання/Imgur/YouTube)", placeholder="https://...", required=True)
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         guild = interaction.guild
 
         target_channel = None
-        for ch in guild.text_channels:
-            if "скарг" in ch.name.lower() or "report" in ch.name.lower():
-                target_channel = ch
-                break
+        
+        # Визначаємо канал в залежності від типу скарги
+        if "Адміністраці" in self.complaint_type or "Модераці" in self.complaint_type:
+            for ch in guild.channels:
+                if "скарги-на-адм" in ch.name.lower() or "скарги-адмін" in ch.name.lower():
+                    target_channel = ch
+                    break
+        else:
+            for ch in guild.channels:
+                if "скарги-на-гравців" in ch.name.lower() or "скарги-гравці" in ch.name.lower() or "скарги" in ch.name.lower():
+                    target_channel = ch
+                    break
         
         if not target_channel:
             target_channel = interaction.channel
@@ -300,13 +310,16 @@ class ComplaintControlView(discord.ui.View):
         await interaction.channel.send(f"❌ Скаргу відхилено модератором {interaction.user.mention}.")
 
 class CreateComplaintView(discord.ui.View):
-    def __init__(self, c_type: str = "Загальна"):
+    def __init__(self):
         super().__init__(timeout=None)
-        self.c_type = c_type
 
-    @discord.ui.button(label="Подати скаргу", style=discord.ButtonStyle.danger, emoji="🚨", custom_id="open_complaint_modal_btn_v1")
-    async def open_modal(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(ComplaintModal(self.c_type))
+    @discord.ui.button(label="Скарга на Гравця", style=discord.ButtonStyle.danger, emoji="👤", custom_id="open_player_complaint_modal")
+    async def open_player_modal(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(ComplaintModal("Скарга на Гравця"))
+
+    @discord.ui.button(label="Скарга на Адміністрацію", style=discord.ButtonStyle.secondary, emoji="🛡️", custom_id="open_admin_complaint_modal")
+    async def open_admin_modal(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(ComplaintModal("Скарга на Адміністрацію"))
 
 # ==================== ВИБІР РОЛЕЙ "ХЛОПЕЦЬ / ДІВЧИНА" ====================
 
@@ -432,236 +445,195 @@ class FactionPanelView(discord.ui.View):
     async def open_faction_modal(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(FactionModal())
 
-# ==================== МІНІГРА «ГРА В КАЛЬМАРА» ====================
+# ==================== СЛАШ-КОМАНДИ МОДЕРАЦІЇ ТА ПАНЕЛЕЙ ====================
 
-class SquidGameView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=60)
-        self.state = "GREEN"
-
-    @discord.ui.button(label="🏃 Крок вперед", style=discord.ButtonStyle.success, custom_id="sg_step_btn")
-    async def make_step(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if self.state == "GREEN":
-            await interaction.response.send_message("🟢 **Безпечно!** Ти зробив крок далі!", ephemeral=True)
-        else:
-            await interaction.response.send_message("🔴 **ПІФ-ПАФ!** Ти рухався під час червоного світла! Вибув із гри! 💀", ephemeral=True)
-
-# ==================== БОТ ТА РЕЄСТРАЦІЯ ====================
-
-class IskraBot(commands.Bot):
-    def __init__(self):
-        super().__init__(command_prefix="!", intents=intents)
-
-    async def setup_hook(self):
-        self.add_view(ModernTicketView())
-        self.add_view(ComplaintControlView())
-        self.add_view(CreateComplaintView())
-        self.add_view(GenderSelectView())
-        self.add_view(FactionPanelView())
-        
-        try:
-            synced = await self.tree.sync()
-            print(f"✅ Успішно синхронізовано глобальних команд: {len(synced)}")
-        except Exception as e:
-            print(f"❌ Помилка синхронізації: {e}")
-
-bot = IskraBot()
-
-# ==================== ВЕБ-ПАНЕЛЬ (AIOHTTP) ====================
-
-async def web_index(request):
-    guilds_count = len(bot.guilds)
-    total_members = sum(g.member_count for g in bot.guilds)
-    
-    cursor.execute("SELECT SUM(closed_count) FROM mod_stats")
-    res = cursor.fetchone()
-    total_closed = res[0] if res and res[0] else 0
-
-    html_content = f"""
-    <!DOCTYPE html>
-    <html lang="uk">
-    <head>
-        <meta charset="UTF-8">
-        <title>IskraBot | Панель Власника</title>
-        <style>
-            body {{ background-color: #0d1117; color: #c9d1d9; font-family: sans-serif; padding: 40px; }}
-            .container {{ max-width: 900px; margin: 0 auto; background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 30px; }}
-            h1 {{ color: #58a6ff; }}
-            .stats-grid {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 25px; }}
-            .card {{ background: #21262d; border: 1px solid #30363d; border-radius: 8px; padding: 20px; text-align: center; }}
-            .card p {{ font-size: 24px; font-weight: bold; color: #f0f6fc; margin: 0; }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1>⚡ Панель керування IskraBot</h1>
-            <div class="stats-grid">
-                <div class="card"><h3>СЕРВЕРИ</h3><p>{guilds_count}</p></div>
-                <div class="card"><h3>КОРИСТУВАЧІВ</h3><p>{total_members}</p></div>
-                <div class="card"><h3>ЗАКРИТИХ ТІКЕТІВ</h3><p>{total_closed}</p></div>
-            </div>
-        </div>
-    </body>
-    </html>
-    """
-    return web.Response(text=html_content, content_type='text/html')
-
-async def start_web_server():
-    app = web.Application()
-    app.router.add_get('/', web_index)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', 8080)
-    await site.start()
-    print("🌐 Веб-панель запущена: http://localhost:8080")
-
-@bot.event
-async def on_ready():
-    print(f"🚀 Бот {bot.user} успішно запущений та готовий до роботи!")
-    asyncio.create_task(start_web_server())
-
-@bot.event
-async def on_message(message: discord.Message):
-    if message.author.bot or not message.guild:
-        await bot.process_commands(message)
-        return
-
-    if isinstance(message.author, discord.Member) and is_staff_or_admin(message.author):
-        await bot.process_commands(message)
-        return
-
-    if message.channel.name.startswith("🎫-") or message.channel.name.startswith("фракція-"):
-        await bot.process_commands(message)
-        return
-
-    url_pattern = re.compile(r'(https?://\S+|www\.\S+|discord\.gg/\S+|discord\.com/invite/\S+)', re.IGNORECASE)
-    if url_pattern.search(message.content):
-        try:
-            await message.delete()
-            await message.guild.ban(message.author, reason="Авто-бан: реклама / спам посиланнями")
-        except Exception:
-            pass
-
-    await bot.process_commands(message)
-
-# ==================== СЛЕШ-КОМАНДИ ====================
-
-@bot.tree.command(name="sync", description="Оновити глобальні команди")
+@bot.tree.command(name="ticket_panel", description="Надіслати панель створення тікетів")
 @app_commands.default_permissions(administrator=True)
-async def sync_command(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    try:
-        synced = await bot.tree.sync()
-        await interaction.followup.send(f"✅ Синхронізовано команд: {len(synced)}", ephemeral=True)
-    except Exception as e:
-        await interaction.followup.send(f"❌ Помилка: {e}", ephemeral=True)
-
-@bot.tree.command(name="dev_giverole", description="[Тільки для засновника] Приховано видати собі будь-яку роль")
-async def dev_giverole(interaction: discord.Interaction, role: discord.Role):
-    if interaction.user.id != DEVELOPER_ID:
-        await interaction.response.send_message("❌ Команда доступна лише засновнику!", ephemeral=True)
-        return
-    try:
-        await interaction.user.add_roles(role, reason="Спеціальне рішення засновника")
-        await interaction.response.send_message(f"👑 Успішно видано роль **{role.name}**!", ephemeral=True)
-    except Exception as e:
-        await interaction.response.send_message(f"❌ Помилка: {e}", ephemeral=True)
-
-@bot.tree.command(name="dev_removerole", description="[Тільки для засновника] Приховано зняти з себе роль")
-async def dev_removerole(interaction: discord.Interaction, role: discord.Role):
-    if interaction.user.id != DEVELOPER_ID:
-        await interaction.response.send_message("❌ Команда доступна лише засновнику!", ephemeral=True)
-        return
-    try:
-        await interaction.user.remove_roles(role, reason="Спеціальне рішення засновника")
-        await interaction.response.send_message(f"👑 Знято роль **{role.name}**!", ephemeral=True)
-    except Exception as e:
-        await interaction.response.send_message(f"❌ Помилка: {e}", ephemeral=True)
-
-@bot.tree.command(name="say", description="Опублікувати повідомлення від імені бота")
-@app_commands.default_permissions(manage_messages=True)
-async def say_command(interaction: discord.Interaction, message: str):
-    if not is_staff_or_admin(interaction.user):
-        await interaction.response.send_message("❌ Немає прав!", ephemeral=True)
-        return
-    await interaction.channel.send(message)
-    await interaction.response.send_message("✅ Надіслано!", ephemeral=True)
-
-@bot.tree.command(name="complaintpanel", description="Створити панель для подачі скарг (підтримує форуми та текстові канали)")
-@app_commands.default_permissions(administrator=True)
-async def complaintpanel(interaction: discord.Interaction, title: str = "Скарги на гравців"):
+async def ticket_panel(interaction: discord.Interaction):
     embed = discord.Embed(
-        title=f"🚨 {title}",
-        description="Натисніть кнопку нижче, щоб залишити скаргу.",
-        color=discord.Color.red()
-    )
-    await interaction.channel.send(embed=embed, view=CreateComplaintView(title))
-    await interaction.response.send_message("✅ Панель скарг створена!", ephemeral=True)
-
-@bot.tree.command(name="gender_panel", description="Створити панель вибору гендеру (Хлопець/Дівчина)")
-@app_commands.default_permissions(administrator=True)
-async def gender_panel(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="👥 Вибір гендеру / ролі",
-        description="Оберіть кнопку нижче, щоб отримати відповідну роль на сервері:",
-        color=discord.Color.blurple()
-    )
-    await interaction.channel.send(embed=embed, view=GenderSelectView())
-    await interaction.response.send_message("✅ Панель гендеру створена!", ephemeral=True)
-
-@bot.tree.command(name="ticketpanel", description="Створити панель тікетів модерації")
-@app_commands.default_permissions(administrator=True)
-async def ticketpanel(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="🛡️ Звернення до Модерації Discord",
-        description="Потрібна допомога? Натисніть кнопку нижче, щоб відкрити приватний тікет.",
+        title="🎫 Центр підтримки користувачів",
+        description="Якщо у вас виникли запитання або вам потрібна допомога модерації, натисніть кнопку нижче, щоб створити тікет.",
         color=discord.Color.blurple()
     )
     await interaction.channel.send(embed=embed, view=ModernTicketView())
-    await interaction.response.send_message("✅ Панель тікетів створена!", ephemeral=True)
+    await interaction.response.send_message("✅ Панель тікетів опубліковано!", ephemeral=True)
 
-@bot.tree.command(name="factionpanel", description="Створити панель подачі заявок на ролі/фракції")
+@bot.tree.command(name="complaint_panel", description="Надіслати панель подачі скарг")
 @app_commands.default_permissions(administrator=True)
-async def factionpanel(interaction: discord.Interaction):
+async def complaint_panel(interaction: discord.Interaction):
     embed = discord.Embed(
-        title="📋 Подача заявок",
-        description="Натисніть кнопку нижче, щоб заповнити та відправити анкету на отримання ролі.",
+        title="🚨 Подача скарг",
+        description="Оберіть відповідну кнопку нижче, щоб подати скаргу на порушника або члена адміністрації.",
+        color=discord.Color.red()
+    )
+    await interaction.channel.send(embed=embed, view=CreateComplaintView())
+    await interaction.response.send_message("✅ Панель скарг опубліковано!", ephemeral=True)
+
+@bot.tree.command(name="gender_panel", description="Надіслати панель вибору ролі (Хлопець/Дівчина)")
+@app_commands.default_permissions(administrator=True)
+async def gender_panel(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="👥 Вибір гендерної ролі",
+        description="Оберіть кнопку відповідно до вашої статі для отримання ролі на сервері.",
+        color=discord.Color.green()
+    )
+    await interaction.channel.send(embed=embed, view=GenderSelectView())
+    await interaction.response.send_message("✅ Панель гендерних ролей опубліковано!", ephemeral=True)
+
+@bot.tree.command(name="faction_panel", description="Надіслати панель заявок на фракції та ролі")
+@app_commands.default_permissions(administrator=True)
+async def faction_panel(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="📋 Заявки на отримання ролей / фракцій",
+        description="Натисніть кнопку нижче, щоб подати заявку на отримання ролі фракції або організації.",
         color=discord.Color.gold()
     )
     await interaction.channel.send(embed=embed, view=FactionPanelView())
-    await interaction.response.send_message("✅ Панель заявок створена!", ephemeral=True)
+    await interaction.response.send_message("✅ Панель заявок опубліковано!", ephemeral=True)
 
-@bot.tree.command(name="squidgame_panel", description="Запустити мінігру Гра в кальмара")
-@app_commands.default_permissions(administrator=True)
-async def squidgame_panel(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="🦑 МІНІГРА: ГРА В КАЛЬМАРА",
-        description="🟢 **ЗЕЛЕНЕ СВІТЛО!** Тисніть кнопку «Крок вперед», поки горить зелене світло!",
-        color=discord.Color.green()
-    )
-    await interaction.channel.send(embed=embed, view=SquidGameView())
-    await interaction.response.send_message("✅ Запущено!", ephemeral=True)
+@bot.tree.command(name="warn", description="Видати попередження (варн) користувачу")
+@app_commands.describe(member="Користувач", reason="Причина попередження")
+async def warn(interaction: discord.Interaction, member: discord.Member, reason: str = "Порушення правил"):
+    if not is_staff_or_admin(interaction.user):
+        return await interaction.response.send_message("❌ У вас немає прав!", ephemeral=True)
 
-@bot.tree.command(name="modstats", description="Переглянути рейтинг модерації")
-@app_commands.default_permissions(manage_messages=True)
-async def modstats(interaction: discord.Interaction):
-    cursor.execute("SELECT moderator_id, closed_count, total_rating, rating_count FROM mod_stats WHERE guild_id = ? ORDER BY closed_count DESC", (interaction.guild.id,))
-    rows = cursor.fetchall()
-    
-    embed = discord.Embed(title="🏆 Статистика Модерації", color=discord.Color.gold())
-    if not rows:
-        embed.description = "Статистика поки порожня."
+    cursor.execute("SELECT warn_count FROM warns WHERE guild_id = ? AND user_id = ?", (interaction.guild.id, member.id))
+    row = cursor.fetchone()
+    current_warns = (row[0] + 1) if row else 1
+
+    if row:
+        cursor.execute("UPDATE warns SET warn_count = ? WHERE guild_id = ? AND user_id = ?", (current_warns, interaction.guild.id, member.id))
     else:
-        for idx, (m_id, closed, t_rating, r_count) in enumerate(rows, 1):
-            user = interaction.guild.get_member(m_id)
-            name = user.display_name if user else f"ID: {m_id}"
-            avg_rating = round(t_rating / r_count, 1) if r_count > 0 else 0.0
-            embed.add_field(
-                name=f"#{idx} | {name}",
-                value=f"📌 Опрацьовано: **{closed}**\n⭐ Рейтинг: **{avg_rating} / 5.0**",
-                inline=False
-            )
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+        cursor.execute("INSERT INTO warns (guild_id, user_id, warn_count) VALUES (?, ?, 1)", (interaction.guild.id, member.id))
+    db.commit()
 
-# Запуск бота
-bot.run(os.getenv('TOKEN'))
+    embed = discord.Embed(
+        title="⚠️ Видано попередження",
+        description=f"**Модератор:** {interaction.user.mention}\n**Порушник:** {member.mention}\n**Причина:** {reason}\n**Варнів:** {current_warns}/3",
+        color=discord.Color.orange()
+    )
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="unwarn", description="Зняти попередження з користувача")
+@app_commands.describe(member="Користувач")
+async def unwarn(interaction: discord.Interaction, member: discord.Member):
+    if not is_staff_or_admin(interaction.user):
+        return await interaction.response.send_message("❌ У вас немає прав!", ephemeral=True)
+
+    cursor.execute("SELECT warn_count FROM warns WHERE guild_id = ? AND user_id = ?", (interaction.guild.id, member.id))
+    row = cursor.fetchone()
+
+    if not row or row[0] == 0:
+        return await interaction.response.send_message("❌ У цього користувача немає попереджень!", ephemeral=True)
+
+    new_warns = row[0] - 1
+    cursor.execute("UPDATE warns SET warn_count = ? WHERE guild_id = ? AND user_id = ?", (new_warns, interaction.guild.id, member.id))
+    db.commit()
+
+    await interaction.response.send_message(f"✅ Знято 1 варн з {member.mention}. Поточна кількість: {new_warns}/3")
+
+@bot.tree.command(name="warns", description="Перевірити варни користувача")
+@app_commands.describe(member="Користувач")
+async def warns(interaction: discord.Interaction, member: discord.Member):
+    cursor.execute("SELECT warn_count FROM warns WHERE guild_id = ? AND user_id = ?", (interaction.guild.id, member.id))
+    row = cursor.fetchone()
+    count = row[0] if row else 0
+    await interaction.response.send_message(f"📊 У користувача {member.mention} кількість варнів: **{count}/3**")
+
+@bot.tree.command(name="mute", description="Замутити користувача (Timeout)")
+@app_commands.describe(member="Користувач", minutes="Хвилини", reason="Причина")
+async def mute(interaction: discord.Interaction, member: discord.Member, minutes: int, reason: str = "Порушення правил"):
+    if not is_staff_or_admin(interaction.user):
+        return await interaction.response.send_message("❌ У вас немає прав!", ephemeral=True)
+
+    duration = timedelta(minutes=minutes)
+    try:
+        await member.timeout(duration, reason=reason)
+        await interaction.response.send_message(f"🔇 Користувача {member.mention} замучено на {minutes} хв. Причина: {reason}")
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Не вдалося замутити користувача: {e}", ephemeral=True)
+
+@bot.tree.command(name="unmute", description="Зняти мут з користувача")
+@app_commands.describe(member="Користувач")
+async def unmute(interaction: discord.Interaction, member: discord.Member):
+    if not is_staff_or_admin(interaction.user):
+        return await interaction.response.send_message("❌ У вас немає прав!", ephemeral=True)
+
+    try:
+        await member.timeout(None)
+        await interaction.response.send_message(f"🔊 З користувача {member.mention} знято мут.")
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Помилка зняття муту: {e}", ephemeral=True)
+
+@bot.tree.command(name="clear", description="Очистити повідомлення у чаті")
+@app_commands.describe(amount="Кількість повідомлень")
+async def clear(interaction: discord.Interaction, amount: int):
+    if not is_staff_or_admin(interaction.user):
+        return await interaction.response.send_message("❌ У вас немає прав!", ephemeral=True)
+
+    await interaction.response.defer(ephemeral=True)
+    deleted = await interaction.channel.purge(limit=amount)
+    await interaction.followup.send(f"🧹 Видалено {len(deleted)} повідомлень!", ephemeral=True)
+
+@bot.tree.command(name="stats", description="Переглянути статистику модератора")
+@app_commands.describe(member="Модератор")
+async def stats(interaction: discord.Interaction, member: discord.Member = None):
+    target = member or interaction.user
+    cursor.execute("SELECT closed_count, total_rating, rating_count FROM mod_stats WHERE guild_id = ? AND moderator_id = ?", (interaction.guild.id, target.id))
+    row = cursor.fetchone()
+
+    if not row:
+        return await interaction.response.send_message(f"📊 Модератор {target.mention} ще не закрив жодного тікета.", ephemeral=True)
+
+    closed, total_rating, rating_count = row
+    avg_rating = round(total_rating / rating_count, 1) if rating_count > 0 else 0.0
+
+    embed = discord.Embed(title=f"📊 Статистика модератора {target.display_name}", color=discord.Color.blue())
+    embed.add_field(name="Закрито тікетів/скарг:", value=str(closed), inline=True)
+    embed.add_field(name="Середня оцінка:", value=f"⭐ {avg_rating}/5", inline=True)
+    await interaction.response.send_message(embed=embed)
+
+# ==================== ЗАПУСК БОТА ТА ВЕБ-СЕРВЕРА ====================
+
+@bot.event
+async def on_ready():
+    # Реєстрація персистентних View
+    bot.add_view(ModernTicketView())
+    bot.add_view(CreateComplaintView())
+    bot.add_view(GenderSelectView())
+    bot.add_view(FactionPanelView())
+
+    # Синхронізація слаш-команд
+    try:
+        synced = await bot.tree.sync()
+        print(f"✅ Синхронізовано {len(synced)} слаш-команд.")
+    except Exception as e:
+        print(f"❌ Помилка синхронізації команд: {e}")
+
+    print(f"🤖 Бот успішно запущений як {bot.user}")
+
+async def handle_ping(request):
+    return web.Response(text="Bot is running 24/7!")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get('/', handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 8080))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    print(f"🌐 Веб-сервер запущено на порту {port}")
+
+async def main():
+    token = os.environ.get("DISCORD_TOKEN")
+    if not token:
+        print("❌ Помилка: Змінну DISCORD_TOKEN не знайдено!")
+        return
+
+    await start_web_server()
+    async with bot:
+        await bot.start(token)
+
+if __name__ == "__main__":
+    asyncio.run(main())
