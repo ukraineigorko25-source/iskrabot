@@ -311,13 +311,14 @@ class ModernTicketControlView(discord.ui.View):
             return await interaction.response.send_message("❌ Немає прав!", ephemeral=True)
         await interaction.response.send_message(embed=discord.Embed(title="⭐ Оцініть роботу модератора", color=discord.Color.blurple()), view=TicketRatingView(interaction.guild.id, self.mod_id, self.author_id, interaction.channel))
 
-# ==================== КОМАНДИ ====================
+# ==================== КОМАНДИ З ВИБОРОМ КАНАЛУ ====================
 
-@bot.tree.command(name="setup_forum", description="Створити панель скарг у поточному каналі/форумі")
+@bot.tree.command(name="setup_forum", description="Створити панель скарг у вказаному форумі чи каналі")
 @app_commands.default_permissions(administrator=True)
-async def setup_forum(interaction: discord.Interaction):
+@app_commands.describe(channel="Виберіть форум або канал, куди надіслати панель скарг")
+async def setup_forum(interaction: discord.Interaction, channel: discord.abc.GuildChannel):
     embed = discord.Embed(
-        title=f"📋 Скарги ({interaction.channel.name})",
+        title=f"📋 Скарги ({channel.name})",
         description=(
             "❓ У цьому каналі ви можете створити скаргу.\n"
             "Щоб подати скаргу, натисніть кнопку нижче.\n\n"
@@ -329,8 +330,12 @@ async def setup_forum(interaction: discord.Interaction):
         ),
         color=discord.Color.red()
     )
-    await interaction.channel.send(embed=embed, view=CreateComplaintView())
-    await interaction.response.send_message("✅ Панель успішно встановлено!", ephemeral=True)
+    
+    try:
+        await channel.send(embed=embed, view=CreateComplaintView())
+        await interaction.response.send_message(f"✅ Панель успішно надіслано в канал {channel.mention}!", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Помилка надсилання: {e}", ephemeral=True)
 
 @bot.tree.command(name="ticketpanel", description="Створити панель тікетів")
 @app_commands.default_permissions(administrator=True)
