@@ -176,6 +176,40 @@ async def on_ready():
     print(f"Бот {bot.user} успішно запущений!")
     asyncio.create_task(start_web_server())
 
+    # АВТОМАТИЧНЕ СТВОРЕННЯ ПАНЕЛІ У ФОРУМАХ (ЯК У ВЕРБОБОТА)
+    for guild in bot.guilds:
+        for channel in guild.forum_channels:
+            if "скарг" in channel.name.lower() or "покарання" in channel.name.lower():
+                try:
+                    # Перевіряємо, чи бот вже створював тут пост
+                    async for thread in channel.archived_threads(limit=10):
+                        pass
+                    threads = channel.threads
+                    bot_posted = any(t.owner and t.owner.id == bot.user.id for t in threads)
+                    
+                    if not bot_posted:
+                        embed = discord.Embed(
+                            title=f"💬 Скарги та правила ({channel.name})",
+                            description=(
+                                "❓ У цьому каналі ви можете створити скаргу.\n"
+                                "Щоб створити скаргу, натисніть на кнопку нижче.\n\n"
+                                "1. **Загальні вимоги до скарг:**\n"
+                                "• чіткі докази порушення\n"
+                                "• опис суті ситуації\n"
+                                "• нікнейми учасників\n\n"
+                                "2. Скарга повинна бути подана учасником ситуації.\n"
+                                "3. Скарга повинна бути написана коректно та адекватно."
+                            ),
+                            color=discord.Color.red()
+                        )
+                        await channel.create_thread(
+                            name="📌 | Інструкція та подача скарги",
+                            embed=embed,
+                            view=CreateComplaintView()
+                        )
+                except Exception as e:
+                    print(f"Помилка автоматичного створення поста у форумі {channel.name}: {e}")
+
 @bot.event
 async def on_member_join(member: discord.Member):
     welcome_channel = None
@@ -334,7 +368,7 @@ class CreateComplaintView(discord.ui.View):
     async def open_set_nick_modal(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(SetNicknameModal())
 
-# ==================== СИСТЕМА ТІКЕТІВ З ОЦІНКОЮ ТА ТРАНСКРИПТОМ ====================
+# ==================== СИСТЕМА ТІКЕТІВ ====================
 
 class TicketRatingView(discord.ui.View):
     def __init__(self, guild_id: int, moderator_id: int, author_id: int, channel: discord.TextChannel):
@@ -349,20 +383,14 @@ class TicketRatingView(discord.ui.View):
             return await interaction.response.send_message("❌ Тільки автор тікета може поставити оцінку!", ephemeral=True)
 
         await interaction.response.defer(ephemeral=True)
-        if self.moderator_id: 
-            add_mod_stat(self.guild_id, self.moderator_id, rating=rating)
+        if self.moderator_id: add_mod_stat(self.guild_id, self.moderator_id, rating=rating)
 
-        # Збираємо історію повідомлень для транскрипту
         messages = []
         async for msg in self.channel.history(limit=500, oldest_first=True):
             messages.append(f"[{msg.created_at.strftime('%Y-%m-%d %H:%M:%S')}] {msg.author.name}: {msg.content}")
             
         file_data = io.BytesIO("\n".join(messages).encode("utf-8"))
-        embed = discord.Embed(
-            title="📄 Транскрипт закритого тікета",
-            description=f"**Сервер:** {interaction.guild.name}\n**Оцінка модератора:** {rating_name} ({rating}/5)",
-            color=discord.Color.gold()
-        )
+        embed = discord.Embed(title="📄 Транскрипт закритого тікета", description=f"**Сервер:** {interaction.guild.name}\n**Оцінка:** {rating_name} ({rating}/5)", color=discord.Color.gold())
 
         author = interaction.guild.get_member(self.author_id)
         if author:
@@ -419,8 +447,7 @@ class ModernTicketControlView(discord.ui.View):
 
     @discord.ui.button(label="📌 Взяти на розгляд", style=discord.ButtonStyle.primary, custom_id="modern_take_ticket_btn_v6")
     async def take_ticket(self, interaction: discord.Interaction, button):
-        if not is_staff_or_admin(interaction.user): 
-            return await interaction.response.send_message("❌ Недостатньо прав!", ephemeral=True)
+        if not is_staff_or_admin(interaction.user): return await interaction.response.send_message("❌ Недостатньо прав!", ephemeral=True)
         self.assigned_mod_id = interaction.user.id
         button.disabled = True
         await interaction.message.edit(view=self)
@@ -430,35 +457,10 @@ class ModernTicketControlView(discord.ui.View):
     async def close_ticket(self, interaction: discord.Interaction, button):
         if not is_staff_or_admin(interaction.user) and interaction.user.id != self.author_id:
             return await interaction.response.send_message("❌ У вас немає прав!", ephemeral=True)
-        
-        embed = discord.Embed(
-            title="⭐ Оцінка роботи модератора",
-            description="Будь ласка, оцініть роботу модератора нижче:",
-            color=discord.Color.blurple()
-        )
+        embed = discord.Embed(title="⭐ Оцінка роботи модератора", description="Оцініть роботу модератора нижче:", color=discord.Color.blurple())
         await interaction.response.send_message(embed=embed, view=TicketRatingView(interaction.guild.id, self.assigned_mod_id, self.author_id, interaction.channel))
 
 # ==================== СЛЕШ-КОМАНДИ ====================
-
-@bot.tree.command(name="setup_complaint_forum", description="Встановити форму скарг у поточному форумі")
-@app_commands.default_permissions(administrator=True)
-async def setup_complaint_forum(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title=f"📋 Скарги ({interaction.channel.name})",
-        description=(
-            "❓ У цьому каналі ви можете створити скаргу.\n"
-            "Щоб створити скаргу, натисніть на кнопку нижче.\n\n"
-            "1. **Загальні вимоги до скарг:**\n"
-            "• чіткі докази порушення\n"
-            "• опис суті ситуації\n"
-            "• нікнейми учасників\n\n"
-            "2. Скарга повинна бути подана учасником ситуації.\n"
-            "3. Скарга повинна бути написана коректно та адекватно."
-        ),
-        color=discord.Color.red()
-    )
-    await interaction.channel.send(embed=embed, view=CreateComplaintView())
-    await interaction.response.send_message("✅ Панель скарг встановлено у цьому форумі!", ephemeral=True)
 
 @bot.tree.command(name="ticketpanel", description="Створити панель тікетів")
 @app_commands.default_permissions(administrator=True)
