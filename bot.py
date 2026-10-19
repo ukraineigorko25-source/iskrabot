@@ -62,6 +62,7 @@ def get_next_complaint_id(guild_id: int) -> int:
     row = cursor.fetchone()
     if row:
         new_id = row[0] + 1
+        cursor.execute("UPDATE counter FROM complaint_counter WHERE guild_id = ?", (new_id, guild_id))
         cursor.execute("UPDATE complaint_counter SET counter = ? WHERE guild_id = ?", (new_id, guild_id))
     else:
         new_id = 1
@@ -311,7 +312,7 @@ class ModernTicketControlView(discord.ui.View):
             return await interaction.response.send_message("❌ Немає прав!", ephemeral=True)
         await interaction.response.send_message(embed=discord.Embed(title="⭐ Оцініть роботу модератора", color=discord.Color.blurple()), view=TicketRatingView(interaction.guild.id, self.mod_id, self.author_id, interaction.channel))
 
-# ==================== КОМАНДИ З ВИБОРОМ КАНАЛУ ====================
+# ==================== УНИВЕРСАЛЬНАЯ КОМАНДА СЕТАПА ====================
 
 @bot.tree.command(name="setup_forum", description="Створити панель скарг у вказаному форумі чи каналі")
 @app_commands.default_permissions(administrator=True)
@@ -332,8 +333,17 @@ async def setup_forum(interaction: discord.Interaction, channel: discord.abc.Gui
     )
     
     try:
-        await channel.send(embed=embed, view=CreateComplaintView())
-        await interaction.response.send_message(f"✅ Панель успішно надіслано в канал {channel.mention}!", ephemeral=True)
+        # Проверяем, является ли выбранный канал Форумом
+        if isinstance(channel, discord.ForumChannel):
+            thread = await channel.create_thread(
+                name=f"📌 | Скарги ({channel.name})",
+                embed=embed,
+                view=CreateComplaintView()
+            )
+            await interaction.response.send_message(f"✅ Ветку с панелью жалоба успешно создано в форуме {channel.mention} -> {thread.thread.mention}!", ephemeral=True)
+        else:
+            await channel.send(embed=embed, view=CreateComplaintView())
+            await interaction.response.send_message(f"✅ Панель успішно надіслано в канал {channel.mention}!", ephemeral=True)
     except Exception as e:
         await interaction.response.send_message(f"❌ Помилка надсилання: {e}", ephemeral=True)
 
