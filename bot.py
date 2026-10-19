@@ -1,7 +1,6 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-import re
 import asyncio
 import sqlite3
 import io
@@ -114,7 +113,7 @@ def add_mod_stat(guild_id: int, moderator_id: int, rating: int = 0):
         cursor.execute("""
         INSERT INTO mod_stats (guild_id, moderator_id, closed_count, total_rating, rating_count)
         VALUES (?, ?, 1, ?, ?)
-        """, (closed, t_rating, 1 if rating > 0 else 0))
+        """, (guild_id, moderator_id, 1 if rating > 0 else 0))
     db.commit()
 
 def is_staff_or_admin(member: discord.Member) -> bool:
@@ -137,10 +136,8 @@ async def send_mod_log(guild: discord.Guild, text: str, color=discord.Color.red(
     if log_channel:
         embed = discord.Embed(title="🛡️ Лог Модерації", description=text, color=color)
         embed.timestamp = discord.utils.utcnow()
-        try:
-            await log_channel.send(embed=embed)
-        except Exception:
-            pass
+        try: await log_channel.send(embed=embed)
+        except Exception: pass
 
 # ==================== ВЕБ-ПАНЕЛЬ ====================
 
@@ -156,7 +153,7 @@ async def web_index(request):
     <html lang="uk">
     <head>
         <meta charset="UTF-8">
-        <title>UNITED UKRAINE | IskraBot</title>
+        <title>Storm & United Ukraine | IskraBot</title>
         <style>
             body {{ background-color: #0d1117; color: #c9d1d9; font-family: sans-serif; padding: 40px; margin: 0; }}
             .container {{ max-width: 900px; margin: 0 auto; background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 30px; }}
@@ -169,12 +166,12 @@ async def web_index(request):
     </head>
     <body>
         <div class="container">
-            <h1>⚡ UNITED UKRAINE GTA — IskraBot</h1>
+            <h1>⚡ UNITED UKRAINE / STORM — IskraBot</h1>
             <div class="status">🟢 Бот працює 24/7</div>
             <div class="stats-grid">
                 <div class="card"><h3>СЕРВЕРИ</h3><p>{guilds_count}</p></div>
                 <div class="card"><h3>УЧАСНИКІВ</h3><p>{total_members}</p></div>
-                <div class="card"><h3>ЗАКРИТИХ ТІКЕТІВ</h3><p>{total_closed}</p></div>
+                <div class="card"><h3>ЗАКРИТИХ СКАРГ/ТІКЕТІВ</h3><p>{total_closed}</p></div>
             </div>
         </div>
     </body>
@@ -191,7 +188,7 @@ async def start_web_server():
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
 
-# ==================== ОСНОВНИЙ КЛАС БОТА ====================
+# ==================== ОСНОВНИЙ КЛАС ====================
 
 class IskraBot(commands.Bot):
     def __init__(self):
@@ -217,7 +214,7 @@ bot = IskraBot()
 
 @bot.event
 async def on_ready():
-    print(f"Бот UNITED UKRAINE {bot.user} успішно запущений!")
+    print(f"Бот {bot.user} успішно запущений!")
     asyncio.create_task(start_web_server())
 
 @bot.event
@@ -238,7 +235,7 @@ async def on_member_join(member: discord.Member):
         try: await welcome_channel.send(embed=embed)
         except Exception: pass
 
-# ==================== ТОЧНА СИСТЕМА СКАРГ (ДЛЯ ФОРУМІВ) ====================
+# ==================== СИСТЕМА СКАРГ (ФОРУМИ) ====================
 
 class SetNicknameModal(discord.ui.Modal):
     def __init__(self): super().__init__(title="Встановлення нікнейму")
@@ -301,7 +298,7 @@ class ComplaintControlView(discord.ui.View):
 
 class ForumComplaintModal(discord.ui.Modal):
     def __init__(self, channel_name: str, ingame_nick: str):
-        super().__init__(title=f"Скарга: {channel_name[:20]}")
+        super().__init__(title=f"Скарга: {channel_name[:18]}")
         self.channel_name = channel_name
         self.ingame_nick = ingame_nick
 
@@ -366,50 +363,7 @@ class CreateComplaintView(discord.ui.View):
     async def open_set_nick_modal(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(SetNicknameModal())
 
-# ==================== ТІКЕТИ ТА ОЦІНКА ====================
-
-class TicketRatingView(discord.ui.View):
-    def __init__(self, guild_id: int, moderator_id: int, author_id: int, channel: discord.TextChannel):
-        super().__init__(timeout=60)
-        self.guild_id = guild_id
-        self.moderator_id = moderator_id
-        self.author_id = author_id
-        self.channel = channel
-
-    async def save_rating_and_close(self, interaction: discord.Interaction, rating: int, rating_name: str):
-        if interaction.user.id != self.author_id:
-            return await interaction.response.send_message("❌ Тільки автор тікета може поставити оцінку!", ephemeral=True)
-
-        await interaction.response.defer(ephemeral=True)
-        if self.moderator_id: add_mod_stat(self.guild_id, self.moderator_id, rating=rating)
-
-        messages = []
-        async for msg in self.channel.history(limit=500, oldest_first=True):
-            messages.append(f"[{msg.created_at.strftime('%Y-%m-%d %H:%M:%S')}] {msg.author.name}: {msg.content}")
-            
-        file_data = io.BytesIO("\n".join(messages).encode("utf-8"))
-        embed = discord.Embed(title="📄 Транскрипт закритого тікета", description=f"**Сервер:** {interaction.guild.name}\n**Оцінка:** {rating_name} ({rating}/5)", color=discord.Color.gold())
-
-        author = interaction.guild.get_member(self.author_id)
-        if author:
-            try:
-                file_data.seek(0)
-                await author.send(embed=embed, file=discord.File(file_data, filename=f"transcript-{self.channel.name}.txt"))
-            except Exception: pass
-
-        await interaction.followup.send(f"✅ Дякуємо за оцінку (**{rating_name}**)! Тікет закривається...", ephemeral=True)
-        await asyncio.sleep(2)
-        try: await self.channel.delete()
-        except Exception: pass
-
-    @discord.ui.button(label="Відмінно", style=discord.ButtonStyle.success, emoji="😁", custom_id="rate_5_custom")
-    async def rate_5(self, interaction, button): await self.save_rating_and_close(interaction, 5, "Відмінно")
-
-    @discord.ui.button(label="Добре", style=discord.ButtonStyle.primary, emoji="🙂", custom_id="rate_4_custom")
-    async def rate_4(self, interaction, button): await self.save_rating_and_close(interaction, 4, "Добре")
-
-    @discord.ui.button(label="Погано", style=discord.ButtonStyle.danger, emoji="🙁", custom_id="rate_2_custom")
-    async def rate_2(self, interaction, button): await self.save_rating_and_close(interaction, 2, "Погано")
+# ==================== ТІКЕТИ ТА РЕШТА ФУНКЦІОНАЛУ ====================
 
 class ModernTicketModal(discord.ui.Modal):
     def __init__(self): super().__init__(title="Звернення до Модерації")
@@ -441,12 +395,10 @@ class ModernTicketControlView(discord.ui.View):
     def __init__(self, author_id: int):
         super().__init__(timeout=None)
         self.author_id = author_id
-        self.assigned_mod_id = None
 
     @discord.ui.button(label="📌 Взяти на розгляд", style=discord.ButtonStyle.primary, custom_id="modern_take_ticket_btn_v6")
     async def take_ticket(self, interaction: discord.Interaction, button):
         if not is_staff_or_admin(interaction.user): return await interaction.response.send_message("❌ Недостатньо прав!", ephemeral=True)
-        self.assigned_mod_id = interaction.user.id
         button.disabled = True
         await interaction.response.edit_message(view=self)
         await interaction.channel.send(f"📌 Тікет узяв на розгляд модератор {interaction.user.mention}.")
@@ -455,21 +407,31 @@ class ModernTicketControlView(discord.ui.View):
     async def close_ticket(self, interaction: discord.Interaction, button):
         if not is_staff_or_admin(interaction.user) and interaction.user.id != self.author_id:
             return await interaction.response.send_message("❌ У вас немає прав!", ephemeral=True)
-        embed = discord.Embed(title="⭐ Оцінка роботи модератора", description="Оцініть роботу модератора нижче:", color=discord.Color.blurple())
-        await interaction.response.send_message(embed=embed, view=TicketRatingView(interaction.guild.id, self.assigned_mod_id, self.author_id, interaction.channel))
+        await interaction.response.send_message("🔒 Тікет закривається через 3 секунди...")
+        await asyncio.sleep(3)
+        await interaction.channel.delete()
 
-# ==================== УСІ СЛЕШ-КОМАНДИ (ПОВНИЙ НАБІР) ====================
+# ==================== УСІ СЛЕШ-КОМАНДИ ====================
 
 @bot.tree.command(name="setup_complaint_forum", description="Встановити форму скарг у поточному форумі")
 @app_commands.default_permissions(administrator=True)
 async def setup_complaint_forum(interaction: discord.Interaction):
     embed = discord.Embed(
-        title=f"📋 Подача скарги ({interaction.channel.name})",
-        description="Натисніть кнопку **«Подати скаргу»** нижче. Якщо ви ще не вказували свій ігровий нікнейм — натисніть **«Вказати нікнейм»**.",
+        title=f"📋 Скарги ({interaction.channel.name})",
+        description=(
+            "❓ У цьому каналі ви можете створити скаргу.\n"
+            "Щоб створити скаргу, натисніть на кнопку нижче.\n\n"
+            "1. **Загальні вимоги до скарг:**\n"
+            "• чіткі докази порушення\n"
+            "• опис суті ситуації\n"
+            "• нікнейми учасників\n\n"
+            "2. Скарга повинна бути подана учасником ситуації.\n"
+            "3. Скарга повинна бути написана коректно та адекватно."
+        ),
         color=discord.Color.red()
     )
     await interaction.channel.send(embed=embed, view=CreateComplaintView())
-    await interaction.response.send_message("✅ Панель скарг встановлено у цьому форумі!", ephemeral=True)
+    await interaction.response.send_message("✅ Панель скарг встановлено в цьому форумі!", ephemeral=True)
 
 @bot.tree.command(name="ticketpanel", description="Створити панель тікетів")
 @app_commands.default_permissions(administrator=True)
@@ -506,21 +468,6 @@ async def squidgame_cmd(interaction: discord.Interaction):
     await interaction.channel.send(embed=embed, view=SquidGameView())
     await interaction.response.send_message("✅ Панель мінігри створено!", ephemeral=True)
 
-@bot.tree.command(name="modstats", description="Переглянути рейтинг модераторів")
-@app_commands.default_permissions(manage_messages=True)
-async def modstats(interaction: discord.Interaction):
-    cursor.execute("SELECT moderator_id, closed_count, total_rating, rating_count FROM mod_stats WHERE guild_id = ? ORDER BY closed_count DESC", (interaction.guild.id,))
-    rows = cursor.fetchall()
-    embed = discord.Embed(title="🏆 Рейтинг та Статистика модераторів", color=discord.Color.gold())
-    if not rows: embed.description = "Статистика порожня."
-    else:
-        for idx, (m_id, closed, t_rating, r_count) in enumerate(rows, 1):
-            user = interaction.guild.get_member(m_id)
-            name = user.display_name if user else f"ID: {m_id}"
-            avg_rating = round((t_rating or 0) / (r_count or 1), 1) if r_count else 0.0
-            embed.add_field(name=f"#{idx} | {name}", value=f"📌 Закрито: **{closed}** | ⭐ Оцінка: **{avg_rating}/5.0**", inline=False)
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-
 @bot.tree.command(name="ban", description="Заблокувати користувача")
 @app_commands.default_permissions(ban_members=True)
 async def ban_member(interaction: discord.Interaction, member: discord.Member, reason: str = "Причина не вказана"):
@@ -551,16 +498,7 @@ async def warn_member(interaction: discord.Interaction, member: discord.Member, 
     await interaction.response.send_message(f"⚠️ Видано варн {member.mention} [{total_warns}/3].")
     await send_mod_log(interaction.guild, f"⚠️ **ВАРН** | Користувач: {member.mention} [{total_warns}/3] | Причина: {reason}")
 
-@bot.tree.command(name="callmod", description="Викликати модерацію")
-async def callmod(interaction: discord.Interaction, description: str):
-    await interaction.response.defer(ephemeral=True)
-    mod_role = discord.utils.get(interaction.guild.roles, name="🛡️ Модерація (Discord)") or discord.utils.get(interaction.guild.roles, name="Модератор")
-    role_mention = mod_role.mention if mod_role else "@Модерація"
-    embed = discord.Embed(title="🚨 ЕКСТРЕНИЙ ВИКЛИК МОДЕРАЦІЇ", description=f"**Ситуація:** {description}\n**Викликав:** {interaction.user.mention}", color=discord.Color.red())
-    await interaction.channel.send(f"{role_mention}", embed=embed, view=CallModControlView())
-    await interaction.followup.send("✅ Виклик надіслано!", ephemeral=True)
-
-# Допоміжні UI класи
+# Допоміжні класи
 class GenderSelectView(discord.ui.View):
     def __init__(self): super().__init__(timeout=None)
     @discord.ui.button(label="Хлопець", style=discord.ButtonStyle.primary, emoji="👦", custom_id="role_boy_btn_v3")
