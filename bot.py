@@ -1,10 +1,8 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-import re
 import asyncio
 import sqlite3
-import io
 import os
 import random
 from datetime import timedelta
@@ -127,7 +125,7 @@ def add_mod_stat(guild_id: int, moderator_id: int, rating: int = 0):
         cursor.execute("""
         INSERT INTO mod_stats (guild_id, moderator_id, closed_count, total_rating, rating_count)
         VALUES (?, ?, 1, ?, ?)
-        """, (guild_id, moderator_id, rating, 1 if rating > 0 else 0))
+        """, (closed, t_rating, 1 if rating > 0 else 0))
     db.commit()
 
 def is_staff_or_admin(member: discord.Member) -> bool:
@@ -138,7 +136,7 @@ def is_staff_or_admin(member: discord.Member) -> bool:
             return True
     return False
 
-# ==================== ЛОГИ МОДЕРАЦІЇ ====================
+# ==================== СИСТЕМА ЛОГУВАННЯ ====================
 
 async def send_mod_log(guild: discord.Guild, text: str, color=discord.Color.red()):
     log_channel = None
@@ -147,11 +145,8 @@ async def send_mod_log(guild: discord.Guild, text: str, color=discord.Color.red(
             log_channel = channel
             break
     
-    if not log_channel:
-        for channel in guild.text_channels:
-            if "загальний" in channel.name.lower():
-                log_channel = channel
-                break
+    if not log_channel and guild.text_channels:
+        log_channel = guild.text_channels[0]
 
     if log_channel:
         embed = discord.Embed(title="🛡️ Лог Сервера", description=text, color=color)
@@ -161,45 +156,10 @@ async def send_mod_log(guild: discord.Guild, text: str, color=discord.Color.red(
         except Exception:
             pass
 
-# ==================== ВЕБ-ПАНЕЛЬ ====================
+# ==================== ВЕБ-ПАНЕЛЬ (СПРОЩЕНА) ====================
 
 async def web_index(request):
-    guilds_count = len(bot.guilds)
-    total_members = sum(g.member_count for g in bot.guilds)
-    cursor.execute("SELECT SUM(closed_count) FROM mod_stats")
-    res = cursor.fetchone()
-    total_closed = res[0] if res and res[0] else 0
-
-    html_content = f"""
-    <!DOCTYPE html>
-    <html lang="uk">
-    <head>
-        <meta charset="UTF-8">
-        <title>Storm & United Ukraine | IskraBot</title>
-        <style>
-            body {{ background-color: #0d1117; color: #c9d1d9; font-family: sans-serif; padding: 40px; margin: 0; }}
-            .container {{ max-width: 900px; margin: 0 auto; background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 30px; }}
-            h1 {{ color: #58a6ff; margin-top: 0; }}
-            .status {{ display: inline-block; background: #238636; color: white; padding: 5px 12px; border-radius: 20px; font-size: 14px; font-weight: bold; margin-bottom: 20px; }}
-            .stats-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; margin-top: 25px; }}
-            .card {{ background: #21262d; border: 1px solid #30363d; border-radius: 8px; padding: 20px; text-align: center; }}
-            .card p {{ font-size: 28px; font-weight: bold; color: #f0f6fc; margin: 0; }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1>⚡ Панель керування IskraBot</h1>
-            <div class="status">🟢 Бот працює 24/7</div>
-            <div class="stats-grid">
-                <div class="card"><h3>СЕРВЕРИ</h3><p>{guilds_count}</p></div>
-                <div class="card"><h3>КОРИСТУВАЧІВ</h3><p>{total_members}</p></div>
-                <div class="card"><h3>ЗАКРИТИХ СКАРГ/ТІКЕТІВ</h3><p>{total_closed}</p></div>
-            </div>
-        </div>
-    </body>
-    </html>
-    """
-    return web.Response(text=html_content, content_type='text/html')
+    return web.Response(text="<h1>IskraBot Online 24/7</h1>", content_type='text/html')
 
 async def start_web_server():
     app = web.Application()
@@ -210,6 +170,8 @@ async def start_web_server():
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
 
+# ==================== ОСНОВНИЙ КЛАС БОТА ====================
+
 class IskraBot(commands.Bot):
     def __init__(self):
         super().__init__(command_prefix="!", intents=intents)
@@ -218,8 +180,6 @@ class IskraBot(commands.Bot):
         self.add_view(UniversalComplaintView())
         self.add_view(GenderSelectView())
         self.add_view(CallModControlView())
-        self.add_view(FactionPanelView())
-        self.add_view(PlayerAppPanelView())
         self.add_view(ComplaintControlView())
         self.add_view(SquidGameView())
         
@@ -227,13 +187,13 @@ class IskraBot(commands.Bot):
             synced = await self.tree.sync()
             print(f"✅ Синхронізовано команд: {len(synced)}")
         except Exception as e:
-            print(f"❌ Помилка: {e}")
+            print(f"❌ Помилка синхронізації: {e}")
 
 bot = IskraBot()
 
 @bot.event
 async def on_ready():
-    print(f"Бот {bot.user} успішно запущений!")
+    print(f"✅ Бот {bot.user} успішно запущений та готовий до роботи!")
     asyncio.create_task(start_web_server())
 
 # ==================== ПРИВІТАННЯ ====================
@@ -263,7 +223,7 @@ async def on_member_join(member: discord.Member):
         try: await welcome_channel.send(embed=embed)
         except Exception: pass
 
-# ==================== УНІВЕРСАЛЬНА СИСТЕМА СКАРГ (ДЛЯ ВСІХ КАТЕГОРІЙ) ====================
+# ==================== ВСТАНОВЛЕННЯ НІКНЕЙМУ ====================
 
 class SetNicknameModal(discord.ui.Modal):
     def __init__(self): super().__init__(title="Встановлення нікнейму")
@@ -273,6 +233,8 @@ class SetNicknameModal(discord.ui.Modal):
         cursor.execute("INSERT OR REPLACE INTO user_nicknames (user_id, ingame_nick) VALUES (?, ?)", (interaction.user.id, self.nick.value))
         db.commit()
         await interaction.response.send_message(f"✅ Ваш ігровий нікнейм збережено: **{self.nick.value}**.", ephemeral=True)
+
+# ==================== УНІВЕРСАЛЬНА СИСТЕМА СКАРГ ====================
 
 class AdminSelectDropdown(discord.ui.Select):
     def __init__(self, guild: discord.Guild):
@@ -326,12 +288,12 @@ class ComplaintControlView(discord.ui.View):
 
 class ForumComplaintModal(discord.ui.Modal):
     def __init__(self, category_name: str, ingame_nick: str):
-        super().__init__(title=f"Подача скарги: {category_name[:20]}")
+        super().__init__(title=f"Подача скарги: {category_name[:18]}")
         self.category_name = category_name
         self.ingame_nick = ingame_nick
 
-    target = discord.ui.TextInput(label="Нік / Discord порушника", placeholder="Приклад: Igor_Storm / @user", required=True)
-    reason = discord.ui.TextInput(label="Причина скарги", placeholder="DM, Скам, Образи, Блат тощо", required=True)
+    target = discord.ui.TextInput(label="Нік / Discord порушника", placeholder="Igor_Storm / @user", required=True)
+    reason = discord.ui.TextInput(label="Причина скарги", placeholder="DM, Скам, Образи тощо", required=True)
     essence = discord.ui.TextInput(label="Опис ситуації", style=discord.TextStyle.paragraph, placeholder="Детально розпишіть суть...", required=True)
     date_p = discord.ui.TextInput(label="Дата порушення", placeholder="19.10.2026", required=True)
     proofs = discord.ui.TextInput(label="Докази (посилання)", style=discord.TextStyle.paragraph, placeholder="Imgur / YouTube посилання", required=True)
@@ -386,23 +348,7 @@ class UniversalComplaintView(discord.ui.View):
     async def open_nick(self, interaction: discord.Interaction, button):
         await interaction.response.send_modal(SetNicknameModal())
 
-@bot.tree.command(name="setup_complaint_panel", description="Створити універсальну панель скарг (для всіх категорій)")
-@app_commands.default_permissions(administrator=True)
-async def setup_complaint_panel(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="📋 Подача скарги (Універсальна система)",
-        description=(
-            "За допомогою цієї панелі ви можете подати скаргу на:\n"
-            "• Модерацію, ГА, ЗГА, Адміністрацію\n"
-            "• Гравців, Скам, Сім'ї/Клани, Медіа-партнерів тощо.\n\n"
-            "📌 **Інструкція:** Спочатку вкажіть ваш ігровий нікнейм, а потім оберіть необхідну категорію з меню нижче."
-        ),
-        color=discord.Color.red()
-    )
-    await interaction.channel.send(embed=embed, view=UniversalComplaintView())
-    await interaction.response.send_message("✅ Панель скарг створено!", ephemeral=True)
-
-# ==================== МІНІГРА ТА ІНШІ КОМАНДИ ====================
+# ==================== ІНШІ ПАНЕЛІ ТА ІГРИ ====================
 
 class SquidGameView(discord.ui.View):
     def __init__(self): super().__init__(timeout=None)
@@ -410,12 +356,6 @@ class SquidGameView(discord.ui.View):
     async def start(self, interaction: discord.Interaction, b):
         embed = discord.Embed(title="🦑 Гра розпочата!", description="Учасники проходять раунд «Тихіше їдеш — далі будеш»...", color=discord.Color.red())
         await interaction.response.send_message(embed=embed)
-
-@bot.tree.command(name="squidgame", description="Запустити мінігру «Ігра в кальмара»")
-@app_commands.default_permissions(manage_messages=True)
-async def squidgame_cmd(interaction: discord.Interaction):
-    await interaction.channel.send(embed=discord.Embed(title="🦑 Гра в кальмара", color=discord.Color.red()), view=SquidGameView())
-    await interaction.response.send_message("✅ Створено!", ephemeral=True)
 
 class GenderSelectView(discord.ui.View):
     def __init__(self): super().__init__(timeout=None)
@@ -445,9 +385,23 @@ class CallModControlView(discord.ui.View):
         await interaction.message.edit(view=self)
         await interaction.channel.send(f"🛡️ {interaction.user.mention} прийняв виклик.")
 
-class PlayerAppPanelView(discord.ui.View):
-    def __init__(self): super().__init__(timeout=None)
-class FactionPanelView(discord.ui.View):
-    def __init__(self): super().__init__(timeout=None)
+# ==================== СЛЕШ-КОМАНДИ ====================
+
+@bot.tree.command(name="setup_complaint_panel", description="Створити панель скарг")
+@app_commands.default_permissions(administrator=True)
+async def setup_complaint_panel(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="📋 Подача скарги",
+        description="Оберіть категорію з меню нижче або вкажіть ваш нікнейм.",
+        color=discord.Color.red()
+    )
+    await interaction.channel.send(embed=embed, view=UniversalComplaintView())
+    await interaction.response.send_message("✅ Панель створено!", ephemeral=True)
+
+@bot.tree.command(name="squidgame", description="Запустити мінігру «Ігра в кальмара»")
+@app_commands.default_permissions(manage_messages=True)
+async def squidgame_cmd(interaction: discord.Interaction):
+    await interaction.channel.send(embed=discord.Embed(title="🦑 Гра в кальмара", color=discord.Color.red()), view=SquidGameView())
+    await interaction.response.send_message("✅ Створено!", ephemeral=True)
 
 bot.run(os.getenv('TOKEN'))
