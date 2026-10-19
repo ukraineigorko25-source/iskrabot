@@ -59,14 +59,35 @@ CREATE TABLE IF NOT EXISTS warns (
 )""")
 db.commit()
 
+# --- АВТО-МИГРАЦИЯ БАЗЫ ДАННЫХ ДЛЯ СТАРОГО СЕРВЕРА ---
+def setup_database_migration():
+    cursor.execute("PRAGMA table_info(mod_stats)")
+    columns = [column[1] for column in cursor.fetchall()]
+    
+    if "total_rating" not in columns:
+        try:
+            cursor.execute("ALTER TABLE mod_stats ADD COLUMN total_rating INTEGER DEFAULT 0")
+        except Exception:
+            pass
+            
+    if "rating_count" not in columns:
+        try:
+            cursor.execute("ALTER TABLE mod_stats ADD COLUMN rating_count INTEGER DEFAULT 0")
+        except Exception:
+            pass
+            
+    db.commit()
+
+setup_database_migration()
+
 def add_mod_stat(guild_id: int, moderator_id: int, rating: int = 0):
     cursor.execute("SELECT closed_count, total_rating, rating_count FROM mod_stats WHERE guild_id = ? AND moderator_id = ?", (guild_id, moderator_id))
     row = cursor.fetchone()
     
     if row:
         closed = row[0] + 1
-        t_rating = row[1] + rating
-        r_count = row[2] + (1 if rating > 0 else 0)
+        t_rating = (row[1] or 0) + rating
+        r_count = (row[2] or 0) + (1 if rating > 0 else 0)
         cursor.execute("""
         UPDATE mod_stats SET closed_count = ?, total_rating = ?, rating_count = ?
         WHERE guild_id = ? AND moderator_id = ?
@@ -319,7 +340,7 @@ async def modstats(interaction: discord.Interaction):
         for idx, (m_id, closed, t_rating, r_count) in enumerate(rows, 1):
             user = interaction.guild.get_member(m_id)
             name = user.display_name if user else f"ID: {m_id}"
-            avg_rating = round(t_rating / r_count, 1) if r_count > 0 else 0.0
+            avg_rating = round((t_rating or 0) / (r_count or 1), 1) if r_count else 0.0
             embed.add_field(
                 name=f"#{idx} | {name}",
                 value=f"📌 Закрито тікетів/скарг: **{closed}**\n⭐ Середня оцінка: **{avg_rating} / 5.0**",
@@ -498,9 +519,10 @@ class CallModControlView(discord.ui.View):
         if not is_staff_or_admin(interaction.user):
             await interaction.response.send_message("❌ Тільки для модераторів!", ephemeral=True)
             return
+        await interaction.response.defer()
         button.disabled = True
         add_mod_stat(interaction.guild.id, interaction.user.id)
-        await interaction.response.edit_message(view=self)
+        await interaction.message.edit(view=self)
         await interaction.channel.send(f"🛡️ Модератор {interaction.user.mention} взяв виклик.")
 
 # ==================== ОЦІНКА ТА ЗАКРИТТЯ ТІКЕТІВ ====================
@@ -649,10 +671,11 @@ class ModernTicketControlView(discord.ui.View):
             await interaction.response.send_message("❌ Цей тікет вже хтось узяв на розгляд!", ephemeral=True)
             return
 
+        await interaction.response.defer()
         self.taken_by_anyone = True
         self.assigned_mod_id = interaction.user.id
         button.disabled = True
-        await interaction.response.edit_message(view=self)
+        await interaction.message.edit(view=self)
         await interaction.channel.send(f"📌 Тікет узяв на розгляд модератор {interaction.user.mention}.")
 
     @discord.ui.button(label="🔄 Передати тікет", style=discord.ButtonStyle.secondary, custom_id="modern_transfer_ticket_btn_v6")
@@ -723,8 +746,9 @@ class ComplaintControlView(discord.ui.View):
         if not is_staff_or_admin(interaction.user):
             await interaction.response.send_message("❌ Недостатньо прав!", ephemeral=True)
             return
+        await interaction.response.defer()
         button.disabled = True
-        await interaction.response.edit_message(view=self)
+        await interaction.message.edit(view=self)
         await interaction.channel.send(f"🔍 Скаргу взяв {interaction.user.mention}.")
 
     @discord.ui.button(label="Прийняти", style=discord.ButtonStyle.success, emoji="✅", custom_id="accept_c_v4")
