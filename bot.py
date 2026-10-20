@@ -5,6 +5,7 @@ import asyncio
 import sqlite3
 import io
 import os
+import random
 from datetime import timedelta
 from aiohttp import web
 
@@ -115,6 +116,10 @@ class IskraBot(commands.Bot):
         self.add_view(CreateComplaintView())
         self.add_view(ComplaintControlView())
         self.add_view(ModernTicketView())
+        self.add_view(GenderSelectView())
+        self.add_view(FactionPanelView())
+        self.add_view(PlayerAppPanelView())
+        self.add_view(SquidGameView())
         try:
             synced = await self.tree.sync()
             print(f"✅ Синхронізовано команд: {len(synced)}")
@@ -128,26 +133,22 @@ async def on_ready():
     print(f"Бот {bot.user} запущений!")
     asyncio.create_task(start_web_server())
 
-# ==================== ПРЕФІКСНІ КОМАНДИ ДЛЯ ЗРУЧНОСТІ ====================
+# ==================== ПРЕФІКСНІ КОМАНДИ ====================
 
 @bot.command(name="say")
 async def say_command(ctx, *, message: str):
     if not is_staff_or_admin(ctx.author):
         return await ctx.send("❌ Недостатньо прав!", delete_after=5)
-    try:
-        await ctx.message.delete()
-    except:
-        pass
+    try: await ctx.message.delete()
+    except: pass
     await ctx.send(message)
 
 @bot.command(name="setup")
 async def setup_prefix_command(ctx):
     if not is_staff_or_admin(ctx.author):
         return await ctx.send("❌ Недостатньо прав!", delete_after=5)
-    try:
-        await ctx.message.delete()
-    except:
-        pass
+    try: await ctx.message.delete()
+    except: pass
     
     embed = discord.Embed(
         title=f"📋 Скарги ({ctx.channel.name})",
@@ -168,7 +169,7 @@ async def setup_prefix_command(ctx):
     else:
         await ctx.send(embed=embed, view=CreateComplaintView())
 
-# ==================== СИСТЕМА СКАРГ ====================
+# ==================== СИСТЕМА СКАРГ (ВИПРАВЛЕНА) ====================
 
 class SetNicknameModal(discord.ui.Modal):
     def __init__(self): super().__init__(title="Встановлення нікнейму")
@@ -198,28 +199,25 @@ class ComplaintControlView(discord.ui.View):
     async def take(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not is_staff_or_admin(interaction.user): 
             return await interaction.response.send_message("❌ Немає прав!", ephemeral=True)
-        await interaction.response.defer(ephemeral=False)
         button.disabled = True
         try: await interaction.message.edit(view=self)
         except: pass
-        await interaction.channel.send(f"🔍 Скаргу взяв на розгляд {interaction.user.mention}.")
+        await interaction.response.send_message(f"🔍 Скаргу взяв на розгляд {interaction.user.mention}.")
 
     @discord.ui.button(label="Прийняти", style=discord.ButtonStyle.success, emoji="✅", custom_id="accept_c")
     async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not is_staff_or_admin(interaction.user): 
             return await interaction.response.send_message("❌ Немає прав!", ephemeral=True)
-        await interaction.response.defer(ephemeral=False)
         add_mod_stat(interaction.guild.id, interaction.user.id)
-        await interaction.channel.send(f"✅ Скаргу схвалено адміністратором {interaction.user.mention}.")
+        await interaction.response.send_message(f"✅ Скаргу схвалено адміністратором {interaction.user.mention}.")
         await send_mod_log(interaction.guild, f"✅ **СХВАЛЕНО СКАРГУ**\n👮 Адмін: {interaction.user.mention}\nКанал: {interaction.channel.mention}", discord.Color.green())
 
     @discord.ui.button(label="Відхилити", style=discord.ButtonStyle.danger, emoji="❌", custom_id="reject_c")
     async def reject(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not is_staff_or_admin(interaction.user): 
             return await interaction.response.send_message("❌ Немає прав!", ephemeral=True)
-        await interaction.response.defer(ephemeral=False)
         add_mod_stat(interaction.guild.id, interaction.user.id)
-        await interaction.channel.send(f"❌ Скаргу відхилено адміністратором {interaction.user.mention}.")
+        await interaction.response.send_message(f"❌ Скаргу відхилено адміністратором {interaction.user.mention}.")
         await send_mod_log(interaction.guild, f"❌ **ВІДХИЛЕНО СКАРГУ**\n👮 Адмін: {interaction.user.mention}\nКанал: {interaction.channel.mention}")
 
 class ForumComplaintModal(discord.ui.Modal):
@@ -350,18 +348,48 @@ class ModernTicketControlView(discord.ui.View):
     async def take(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not is_staff_or_admin(interaction.user): 
             return await interaction.response.send_message("❌ Немає прав!", ephemeral=True)
-        await interaction.response.defer(ephemeral=False)
         self.mod_id = interaction.user.id
         button.disabled = True
         try: await interaction.message.edit(view=self)
         except: pass
-        await interaction.channel.send(f"📌 Тікет узяв на розгляд {interaction.user.mention}.")
+        await interaction.response.send_message(f"📌 Тікет узяв на розгляд {interaction.user.mention}.")
 
     @discord.ui.button(label="🔒 Закрити тікет", style=discord.ButtonStyle.danger, custom_id="close_t")
     async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not is_staff_or_admin(interaction.user) and interaction.user.id != self.author_id:
             return await interaction.response.send_message("❌ Немає прав!", ephemeral=True)
-        await interaction.response.send_message(embed=discord.Embed(title="⭐ Оцініть роботу модератора", color=discord.Color.blurple()), view=TicketRatingView(interaction.guild.id, self.mod_id, self.author_id, interaction.channel), ephemeral=False)
+        await interaction.response.send_message(embed=discord.Embed(title="⭐ Оцініть роботу модератора", color=discord.Color.blurple()), view=TicketRatingView(interaction.guild.id, self.mod_id, self.author_id, interaction.channel))
+
+# ==================== ДОПОМІЖНІ ПАНЕЛІ ТА ІГРИ ====================
+
+class GenderSelectView(discord.ui.View):
+    def __init__(self): super().__init__(timeout=None)
+    @discord.ui.button(label="Хлопець", style=discord.ButtonStyle.primary, emoji="👦", custom_id="role_boy_btn_v3")
+    async def boy(self, interaction, b):
+        role = discord.utils.get(interaction.guild.roles, name="Хлопець")
+        if role:
+            if role in interaction.user.roles: await interaction.user.remove_roles(role)
+            else: await interaction.user.add_roles(role)
+            await interaction.response.send_message("✅ Роль оновлено!", ephemeral=True)
+
+    @discord.ui.button(label="Дівчина", style=discord.ButtonStyle.success, emoji="👧", custom_id="role_girl_btn_v3")
+    async def girl(self, interaction, b):
+        role = discord.utils.get(interaction.guild.roles, name="Дівчина")
+        if role:
+            if role in interaction.user.roles: await interaction.user.remove_roles(role)
+            else: await interaction.user.add_roles(role)
+            await interaction.response.send_message("✅ Роль оновлено!", ephemeral=True)
+
+class SquidGameView(discord.ui.View):
+    def __init__(self): super().__init__(timeout=None)
+    @discord.ui.button(label="🦑 Почати 'Ігру в кальмара'", style=discord.ButtonStyle.danger, emoji="🎮", custom_id="start_squid_game_main")
+    async def start(self, interaction, b):
+        await interaction.response.send_message(embed=discord.Embed(title="🦑 Гра розпочата!", description="Учасники проходять раунд «Тихіше їдеш — далі будеш»...", color=discord.Color.red()))
+
+class PlayerAppPanelView(discord.ui.View):
+    def __init__(self): super().__init__(timeout=None)
+class FactionPanelView(discord.ui.View):
+    def __init__(self): super().__init__(timeout=None)
 
 # ==================== СЛЕШ-КОМАНДИ ====================
 
@@ -370,6 +398,33 @@ class ModernTicketControlView(discord.ui.View):
 async def ticketpanel(interaction: discord.Interaction):
     await interaction.channel.send(embed=discord.Embed(title="🛡️ Звернення до Модерації", description="Натисніть кнопку нижче, щоб відкрити тікет.", color=discord.Color.blurple()), view=ModernTicketView())
     await interaction.response.send_message("✅ Панель тікетів створена!", ephemeral=True)
+
+@bot.tree.command(name="genderpanel", description="Створити панель вибору ролі (стать)")
+@app_commands.default_permissions(administrator=True)
+async def genderpanel(interaction: discord.Interaction):
+    await interaction.channel.send(embed=discord.Embed(title="🎭 Вибір ролі (Стать)", description="Натисніть кнопку:", color=discord.Color.magenta()), view=GenderSelectView())
+    await interaction.response.send_message("✅ Панель ролей створена!", ephemeral=True)
+
+@bot.tree.command(name="squidgame", description="Запустити мінігру «Ігра в кальмара»")
+@app_commands.default_permissions(manage_messages=True)
+async def squidgame_cmd(interaction: discord.Interaction):
+    await interaction.channel.send(embed=discord.Embed(title="🦑 Гра в кальмара", description="Натисніть кнопку нижче!", color=discord.Color.red()), view=SquidGameView())
+    await interaction.response.send_message("✅ Панель мінігри створено!", ephemeral=True)
+
+@bot.tree.command(name="modstats", description="Переглянути рейтинг модераторів")
+@app_commands.default_permissions(manage_messages=True)
+async def modstats(interaction: discord.Interaction):
+    cursor.execute("SELECT moderator_id, closed_count, total_rating, rating_count FROM mod_stats WHERE guild_id = ? ORDER BY closed_count DESC", (interaction.guild.id,))
+    rows = cursor.fetchall()
+    embed = discord.Embed(title="🏆 Рейтинг модераторів", color=discord.Color.gold())
+    if not rows: embed.description = "Статистика порожня."
+    else:
+        for idx, (m_id, closed, t_rating, r_count) in enumerate(rows, 1):
+            user = interaction.guild.get_member(m_id)
+            name = user.display_name if user else f"ID: {m_id}"
+            avg = round((t_rating or 0) / (r_count or 1), 1) if r_count else 0.0
+            embed.add_field(name=f"#{idx} | {name}", value=f"📌 Закрито: **{closed}** | ⭐ Оцінка: **{avg}/5.0**", inline=False)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="ban", description="Бан")
 @app_commands.default_permissions(ban_members=True)
