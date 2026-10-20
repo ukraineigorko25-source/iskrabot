@@ -62,7 +62,6 @@ def get_next_complaint_id(guild_id: int) -> int:
     row = cursor.fetchone()
     if row:
         new_id = row[0] + 1
-        cursor.execute("UPDATE counter FROM complaint_counter WHERE guild_id = ?", (new_id, guild_id))
         cursor.execute("UPDATE complaint_counter SET counter = ? WHERE guild_id = ?", (new_id, guild_id))
     else:
         new_id = 1
@@ -129,6 +128,46 @@ async def on_ready():
     print(f"Бот {bot.user} запущений!")
     asyncio.create_task(start_web_server())
 
+# ==================== ПРЕФІКСНІ КОМАНДИ ДЛЯ ЗРУЧНОСТІ ====================
+
+@bot.command(name="say")
+async def say_command(ctx, *, message: str):
+    if not is_staff_or_admin(ctx.author):
+        return await ctx.send("❌ Недостатньо прав!", delete_after=5)
+    try:
+        await ctx.message.delete()
+    except:
+        pass
+    await ctx.send(message)
+
+@bot.command(name="setup")
+async def setup_prefix_command(ctx):
+    if not is_staff_or_admin(ctx.author):
+        return await ctx.send("❌ Недостатньо прав!", delete_after=5)
+    try:
+        await ctx.message.delete()
+    except:
+        pass
+    
+    embed = discord.Embed(
+        title=f"📋 Скарги ({ctx.channel.name})",
+        description=(
+            "❓ У цьому каналі ви можете створити скаргу.\n"
+            "Щоб подати скаргу, натисніть кнопку нижче.\n\n"
+            "1. **Вимоги до скарг:**\n"
+            "• Чіткі докази (відео/скріншоти)\n"
+            "• Опис суті ситуації\n"
+            "• Коректні нікнейми\n\n"
+            "2. Подається тільки учасником ситуації в адекватній формі."
+        ),
+        color=discord.Color.red()
+    )
+    
+    if isinstance(ctx.channel, discord.ForumChannel):
+        await ctx.channel.create_thread(name="📌 | Скарги та правила", embed=embed, view=CreateComplaintView())
+    else:
+        await ctx.send(embed=embed, view=CreateComplaintView())
+
 # ==================== СИСТЕМА СКАРГ ====================
 
 class SetNicknameModal(discord.ui.Modal):
@@ -147,33 +186,40 @@ class AdminSelectDropdown(discord.ui.Select):
         super().__init__(placeholder="Обрати відповідального адміністратора", min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction):
-        if not is_staff_or_admin(interaction.user): return await interaction.response.send_message("❌ Недостатньо прав!", ephemeral=True)
+        if not is_staff_or_admin(interaction.user): 
+            return await interaction.response.send_message("❌ Недостатньо прав!", ephemeral=True)
         admin_member = interaction.guild.get_member(int(self.values[0]))
-        await interaction.response.send_message(f"👤 Відповідальним призначено: {admin_member.mention if admin_member else 'Адміністратор'}")
+        await interaction.response.send_message(f"👤 Відповідальним призначено: {admin_member.mention if admin_member else 'Адміністратор'}", ephemeral=True)
 
 class ComplaintControlView(discord.ui.View):
     def __init__(self): super().__init__(timeout=None)
 
     @discord.ui.button(label="Взяти на розгляд", style=discord.ButtonStyle.primary, emoji="🔍", custom_id="take_c")
-    async def take(self, interaction, button):
-        if not is_staff_or_admin(interaction.user): return await interaction.response.send_message("❌ Немає прав!", ephemeral=True)
-        await interaction.response.defer()
+    async def take(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not is_staff_or_admin(interaction.user): 
+            return await interaction.response.send_message("❌ Немає прав!", ephemeral=True)
+        await interaction.response.defer(ephemeral=False)
         button.disabled = True
-        await interaction.message.edit(view=self)
+        try: await interaction.message.edit(view=self)
+        except: pass
         await interaction.channel.send(f"🔍 Скаргу взяв на розгляд {interaction.user.mention}.")
 
     @discord.ui.button(label="Прийняти", style=discord.ButtonStyle.success, emoji="✅", custom_id="accept_c")
-    async def accept(self, interaction, button):
-        if not is_staff_or_admin(interaction.user): return await interaction.response.send_message("❌ Немає прав!", ephemeral=True)
+    async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not is_staff_or_admin(interaction.user): 
+            return await interaction.response.send_message("❌ Немає прав!", ephemeral=True)
+        await interaction.response.defer(ephemeral=False)
         add_mod_stat(interaction.guild.id, interaction.user.id)
-        await interaction.response.send_message(f"✅ Скаргу схвалено адміністратором {interaction.user.mention}.")
+        await interaction.channel.send(f"✅ Скаргу схвалено адміністратором {interaction.user.mention}.")
         await send_mod_log(interaction.guild, f"✅ **СХВАЛЕНО СКАРГУ**\n👮 Адмін: {interaction.user.mention}\nКанал: {interaction.channel.mention}", discord.Color.green())
 
     @discord.ui.button(label="Відхилити", style=discord.ButtonStyle.danger, emoji="❌", custom_id="reject_c")
-    async def reject(self, interaction, button):
-        if not is_staff_or_admin(interaction.user): return await interaction.response.send_message("❌ Немає прав!", ephemeral=True)
+    async def reject(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not is_staff_or_admin(interaction.user): 
+            return await interaction.response.send_message("❌ Немає прав!", ephemeral=True)
+        await interaction.response.defer(ephemeral=False)
         add_mod_stat(interaction.guild.id, interaction.user.id)
-        await interaction.response.send_message(f"❌ Скаргу відхилено адміністратором {interaction.user.mention}.")
+        await interaction.channel.send(f"❌ Скаргу відхилено адміністратором {interaction.user.mention}.")
         await send_mod_log(interaction.guild, f"❌ **ВІДХИЛЕНО СКАРГУ**\n👮 Адмін: {interaction.user.mention}\nКанал: {interaction.channel.mention}")
 
 class ForumComplaintModal(discord.ui.Modal):
@@ -216,14 +262,14 @@ class ForumComplaintModal(discord.ui.Modal):
             thread = await target_channel.create_thread(name=thread_name, embed=embed, view=view)
             await interaction.followup.send(f"✅ Скаргу створено у гілці -> {thread.thread.mention}", ephemeral=True)
         else:
-            msg = await target_channel.send(embed=embed, view=view)
+            await target_channel.send(embed=embed, view=view)
             await interaction.followup.send("✅ Скаргу успішно надіслано!", ephemeral=True)
 
 class CreateComplaintView(discord.ui.View):
     def __init__(self): super().__init__(timeout=None)
 
     @discord.ui.button(label="Подати скаргу", style=discord.ButtonStyle.primary, emoji="📝", custom_id="open_c")
-    async def open_modal(self, interaction, button):
+    async def open_modal(self, interaction: discord.Interaction, button: discord.ui.Button):
         cursor.execute("SELECT ingame_nick FROM user_nicknames WHERE user_id = ?", (interaction.user.id,))
         row = cursor.fetchone()
         if not row:
@@ -235,7 +281,7 @@ class CreateComplaintView(discord.ui.View):
         await interaction.response.send_modal(ForumComplaintModal(ch_name, row[0]))
 
     @discord.ui.button(label="Вказати нікнейм", style=discord.ButtonStyle.secondary, emoji="✏️", custom_id="set_nick")
-    async def open_nick(self, interaction, button):
+    async def open_nick(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(SetNicknameModal())
 
 # ==================== ТІКЕТИ ====================
@@ -245,8 +291,9 @@ class TicketRatingView(discord.ui.View):
         super().__init__(timeout=60)
         self.guild_id, self.mod_id, self.author_id, self.channel = guild_id, mod_id, author_id, channel
 
-    async def close_ticket(self, interaction, rating, name):
-        if interaction.user.id != self.author_id: return await interaction.response.send_message("❌ Тільки автор тікета може оцінити!", ephemeral=True)
+    async def close_ticket(self, interaction: discord.Interaction, rating: int, name: str):
+        if interaction.user.id != self.author_id: 
+            return await interaction.response.send_message("❌ Тільки автор тікета може оцінити!", ephemeral=True)
         await interaction.response.defer(ephemeral=True)
         if self.mod_id: add_mod_stat(self.guild_id, self.mod_id, rating=rating)
         
@@ -293,59 +340,30 @@ class ModernTicketModal(discord.ui.Modal):
 class ModernTicketView(discord.ui.View):
     def __init__(self): super().__init__(timeout=None)
     @discord.ui.button(label="Створити тікет", style=discord.ButtonStyle.success, emoji="🎫", custom_id="mk_ticket")
-    async def mk(self, i, b): await i.response.send_modal(ModernTicketModal())
+    async def mk(self, i: discord.Interaction, b: discord.ui.Button): 
+        await i.response.send_modal(ModernTicketModal())
 
 class ModernTicketControlView(discord.ui.View):
     def __init__(self, author_id): super().__init__(timeout=None); self.author_id, self.mod_id = author_id, None
 
     @discord.ui.button(label="📌 Взяти на розгляд", style=discord.ButtonStyle.primary, custom_id="take_t")
-    async def take(self, interaction, button):
-        if not is_staff_or_admin(interaction.user): return await interaction.response.send_message("❌ Немає прав!", ephemeral=True)
+    async def take(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not is_staff_or_admin(interaction.user): 
+            return await interaction.response.send_message("❌ Немає прав!", ephemeral=True)
+        await interaction.response.defer(ephemeral=False)
         self.mod_id = interaction.user.id
         button.disabled = True
-        await interaction.message.edit(view=self)
-        await interaction.channel.send(f"📌 Тікет узяв {interaction.user.mention}.")
+        try: await interaction.message.edit(view=self)
+        except: pass
+        await interaction.channel.send(f"📌 Тікет узяв на розгляд {interaction.user.mention}.")
 
     @discord.ui.button(label="🔒 Закрити тікет", style=discord.ButtonStyle.danger, custom_id="close_t")
-    async def close(self, interaction, button):
+    async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not is_staff_or_admin(interaction.user) and interaction.user.id != self.author_id:
             return await interaction.response.send_message("❌ Немає прав!", ephemeral=True)
-        await interaction.response.send_message(embed=discord.Embed(title="⭐ Оцініть роботу модератора", color=discord.Color.blurple()), view=TicketRatingView(interaction.guild.id, self.mod_id, self.author_id, interaction.channel))
+        await interaction.response.send_message(embed=discord.Embed(title="⭐ Оцініть роботу модератора", color=discord.Color.blurple()), view=TicketRatingView(interaction.guild.id, self.mod_id, self.author_id, interaction.channel), ephemeral=False)
 
-# ==================== УНИВЕРСАЛЬНАЯ КОМАНДА СЕТАПА ====================
-
-@bot.tree.command(name="setup_forum", description="Створити панель скарг у вказаному форумі чи каналі")
-@app_commands.default_permissions(administrator=True)
-@app_commands.describe(channel="Виберіть форум або канал, куди надіслати панель скарг")
-async def setup_forum(interaction: discord.Interaction, channel: discord.abc.GuildChannel):
-    embed = discord.Embed(
-        title=f"📋 Скарги ({channel.name})",
-        description=(
-            "❓ У цьому каналі ви можете створити скаргу.\n"
-            "Щоб подати скаргу, натисніть кнопку нижче.\n\n"
-            "1. **Вимоги до скарг:**\n"
-            "• Чіткі докази (відео/скріншоти)\n"
-            "• Опис суті ситуації\n"
-            "• Коректні нікнейми\n\n"
-            "2. Подається тільки учасником ситуації в адекватній формі."
-        ),
-        color=discord.Color.red()
-    )
-    
-    try:
-        # Проверяем, является ли выбранный канал Форумом
-        if isinstance(channel, discord.ForumChannel):
-            thread = await channel.create_thread(
-                name=f"📌 | Скарги ({channel.name})",
-                embed=embed,
-                view=CreateComplaintView()
-            )
-            await interaction.response.send_message(f"✅ Ветку с панелью жалоба успешно создано в форуме {channel.mention} -> {thread.thread.mention}!", ephemeral=True)
-        else:
-            await channel.send(embed=embed, view=CreateComplaintView())
-            await interaction.response.send_message(f"✅ Панель успішно надіслано в канал {channel.mention}!", ephemeral=True)
-    except Exception as e:
-        await interaction.response.send_message(f"❌ Помилка надсилання: {e}", ephemeral=True)
+# ==================== СЛЕШ-КОМАНДИ ====================
 
 @bot.tree.command(name="ticketpanel", description="Створити панель тікетів")
 @app_commands.default_permissions(administrator=True)
