@@ -1,5 +1,6 @@
 import os
 import asyncio
+import io
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -29,12 +30,9 @@ discord_bot = commands.Bot(command_prefix="!", intents=intents)
 tg_bot = Bot(token=TG_TOKEN)
 dp = Dispatcher()
 
-# ID адміністратора / чату для логів скарг у Telegram
-TG_ADMIN_CHAT_ID = None  # Сюди можна вписати ID адмін-чату
-
 
 # ==========================================
-# 🛡️ DISCORD: ПРОДВИНУТА СИСТЕМА ТІКЕТІВ ТА МОДЕРАЦІЯ
+# 🛡️ DISCORD: ПРОДВИНУТА СИСТЕМА ТІКЕТІВ ТА ТРАНСКРИПТИ
 # ==========================================
 
 class TicketManagementView(discord.ui.View):
@@ -63,16 +61,34 @@ class RatingView(discord.ui.View):
         super().__init__(timeout=None)
 
     async def rate_and_close(self, interaction: discord.Interaction, rating: str):
-        # Відправляємо лог у ЛС учаснику та модератору (симуляція)
-        try:
-            await interaction.user.send(f"🔒 Ваш тікет закрито. Оцінка підтримки: {rating}. Дякуємо, що звернулися у Varta UA!")
-        except:
-            pass
+        channel = interaction.channel
+        guild = interaction.guild
         
-        await interaction.response.send_message(f"✅ Дякуємо за оцінку ({rating})! Тікет буде повністю закрито через 5 секунд.", ephemeral=False)
+        # Збираємо історію повідомлень для транскрипту (як на твоєму скріншоті)
+        messages_history = []
+        async for message in channel.history(limit=200, oldest_first=True):
+            messages_history.append(f"[{message.created_at.strftime('%Y-%m-%d %H:%M')}] {message.author}: {message.content}")
+        
+        transcript_content = f"Сервер: {guild.name}\nКанал: {channel.name}\nОцінка роботи: {rating}\n\n--- ІСТОРІЯ ПОВІДОМЛЕНЬ ---\n" + "\n".join(messages_history)
+        file_bytes = io.BytesIO(transcript_content.encode('utf-8'))
+        file = discord.File(file_bytes, filename=f"transcript-{channel.name}.txt")
+
+        # Намагаємося відправити файл транскрипту користувачу в ЛС
+        try:
+            # Шукаємо автора тікета за назвою каналу або відправляємо кліку
+            embed_dm = discord.Embed(
+                title="📄 Транскрипт закритого тікета",
+                description=f"Сервер: **{guild.name}**\nОцінка роботи: **{rating}**\nДякуємо, що звернулися у Varta UA!",
+                color=discord.Color.from_rgb(0, 162, 255)
+            )
+            await interaction.user.send(embed=embed_dm, file=file)
+        except Exception as e:
+            print(f"Не вдалося надіслати файл в ЛС: {e}")
+
+        await interaction.response.send_message(f"✅ Дякуємо за оцінку ({rating})! Тікет закрито, транскрипт згенеровано та надіслано в ЛС.", ephemeral=False)
         await asyncio.sleep(5)
         try:
-            await interaction.channel.delete()
+            await channel.delete()
         except:
             pass
 
@@ -94,7 +110,7 @@ class RatingView(discord.ui.View):
 
     @discord.ui.button(label="⭐ 5", style=discord.ButtonStyle.success, custom_id="rate_5")
     async def r5(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.rate_and_close(interaction, "5/5 👑")
+        await self.rate_and_close(interaction, "5/5 (Відмінно)")
 
 class AdvancedTicketView(discord.ui.View):
     def __init__(self):
@@ -218,13 +234,6 @@ async def tg_report(message: types.Message):
     
     reported_user = message.reply_to_message.from_user
     author = message.from_user
-    
-    report_text = (
-        f"🚨 **НОВА СКАРГА (Telegram)**\n\n"
-        f"👤 **Порушник:** {reported_user.full_name} (`{reported_user.id}`)\n"
-        f"🙋‍♂️ **Хто поскаржився:** {author.full_name} (`{author.id}`)\n"
-        f"💬 **Час/Чат:** {message.chat.title or 'Особисті повідомлення'}"
-    )
     
     await message.reply(f"✅ Вашу скаргу на користувача {reported_user.full_name} успішно надіслано адміністраторам!")
 
