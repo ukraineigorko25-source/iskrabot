@@ -8,10 +8,16 @@ from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 # ==========================================
-# 🔑 ТОКЕНИ
+# 🔑 ТОКЕНИ (БЕРУТЬСЯ АВТОМАТИЧНО З ХОСТИНГУ)
 # ==========================================
-DISCORD_TOKEN = "МТУzMjE0NnU2ODc3NDIyMjAyNw.Gwt2bD.M2oC00uXYWgLb81TSCeUA91P"
-TG_TOKEN = "8950607445:AAGIn92dMbqTmOXywvqZg2M_Bq92XVEtftM"
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+TG_TOKEN = os.getenv("TG_TOKEN")
+
+# Перевірка наявності токенів
+if not DISCORD_TOKEN:
+    print("❌ Помилка: Не знайдено змінну середовища DISCORD_TOKEN на хостингу!")
+if not TG_TOKEN:
+    print("❌ Помилка: Не знайдено змінну середовища TG_TOKEN на хостингу!")
 
 # ==========================================
 # 🤖 ІНІЦІАЛІЗАЦІЯ БОТІВ
@@ -46,7 +52,6 @@ class AdvancedTicketView(discord.ui.View):
 
     async def create_ticket_channel(self, interaction: discord.Interaction, category_name: str, welcome_text: str):
         guild = interaction.guild
-        # Шукаємо або створюємо категорію для тікетів
         category = discord.utils.get(guild.categories, name="🎫 ТІКЕТИ ВАРТА UA")
         if not category:
             category = await guild.create_category("🎫 ТІКЕТИ ВАРТА UA")
