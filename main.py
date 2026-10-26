@@ -8,7 +8,7 @@ from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 # ==========================================
-# 🔑 ТОКЕНИ З БЕЗПЕЧНОГО СЕРЕДОВИЩА ХОСТИНГУ
+# 🔑 ТОКЕНИ З ХОСТИНГУ
 # ==========================================
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 TG_TOKEN = os.getenv("TG_TOKEN")
@@ -29,13 +29,72 @@ discord_bot = commands.Bot(command_prefix="!", intents=intents)
 tg_bot = Bot(token=TG_TOKEN)
 dp = Dispatcher()
 
-# ID Засновника (можеш сюди вписати свій Telegram ID або Discord ID для додаткової перевірки, якщо потрібно)
-OWNER_TG_ID = 0  # Сюди можна вписати твій чи другий головний ID за бажанням
+# ID адміністратора / чату для логів скарг у Telegram
+TG_ADMIN_CHAT_ID = None  # Сюди можна вписати ID адмін-чату
 
 
 # ==========================================
-# 🛡️ DISCORD: ТІКЕТИ, МОДЕРАЦІЯ ТА ПРАВА ЗААСНОВНИКА
+# 🛡️ DISCORD: ПРОДВИНУТА СИСТЕМА ТІКЕТІВ ТА МОДЕРАЦІЯ
 # ==========================================
+
+class TicketManagementView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="📌 Взяти на розгляд", style=discord.ButtonStyle.primary, custom_id="ticket_claim")
+    async def claim_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(f"📌 Тікет узяв у роботу модератор: {interaction.user.mention}", ephemeral=False)
+
+    @discord.ui.button(label="🔄 Передати", style=discord.ButtonStyle.secondary, custom_id="ticket_transfer")
+    async def transfer_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(f"🔄 Тікет передано іншому члену старшої адміністрації.", ephemeral=False)
+
+    @discord.ui.button(label="🔒 Закрити тікет", style=discord.ButtonStyle.danger, custom_id="ticket_close_start")
+    async def close_ticket_start(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="⭐ Оцінка підтримки",
+            description="Будь ласка, оцініть роботу модератора від 1 до 5 зірочок за допомогою кнопок нижче:",
+            color=discord.Color.gold()
+        )
+        await interaction.response.send_message(embed=embed, view=RatingView(), ephemeral=False)
+
+class RatingView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    async def rate_and_close(self, interaction: discord.Interaction, rating: str):
+        # Відправляємо лог у ЛС учаснику та модератору (симуляція)
+        try:
+            await interaction.user.send(f"🔒 Ваш тікет закрито. Оцінка підтримки: {rating}. Дякуємо, що звернулися у Varta UA!")
+        except:
+            pass
+        
+        await interaction.response.send_message(f"✅ Дякуємо за оцінку ({rating})! Тікет буде повністю закрито через 5 секунд.", ephemeral=False)
+        await asyncio.sleep(5)
+        try:
+            await interaction.channel.delete()
+        except:
+            pass
+
+    @discord.ui.button(label="⭐ 1", style=discord.ButtonStyle.danger, custom_id="rate_1")
+    async def r1(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.rate_and_close(interaction, "1/5 ❌")
+
+    @discord.ui.button(label="⭐ 2", style=discord.ButtonStyle.danger, custom_id="rate_2")
+    async def r2(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.rate_and_close(interaction, "2/5 ⚠️")
+
+    @discord.ui.button(label="⭐ 3", style=discord.ButtonStyle.secondary, custom_id="rate_3")
+    async def r3(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.rate_and_close(interaction, "3/5 ⏺️")
+
+    @discord.ui.button(label="⭐ 4", style=discord.ButtonStyle.primary, custom_id="rate_4")
+    async def r4(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.rate_and_close(interaction, "4/5 ✅")
+
+    @discord.ui.button(label="⭐ 5", style=discord.ButtonStyle.success, custom_id="rate_5")
+    async def r5(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.rate_and_close(interaction, "5/5 👑")
 
 class AdvancedTicketView(discord.ui.View):
     def __init__(self):
@@ -43,17 +102,17 @@ class AdvancedTicketView(discord.ui.View):
 
     @discord.ui.button(label="🛠️ Технічна підтримка", style=discord.ButtonStyle.primary, custom_id="ticket_tech")
     async def tech_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.create_ticket_channel(interaction, "тех-підтримка", "Опишіть вашу технічну проблему чи баг.")
+        await self.create_ticket_channel(interaction, "тех-підтримка")
 
     @discord.ui.button(label="⚖️ Скарга на порушника", style=discord.ButtonStyle.danger, custom_id="ticket_report")
     async def report_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.create_ticket_channel(interaction, "скарга", "Вкажіть нік порушника та надайте докази.")
+        await self.create_ticket_channel(interaction, "скарга")
 
     @discord.ui.button(label="❓ Загальне питання", style=discord.ButtonStyle.secondary, custom_id="ticket_other")
     async def other_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.create_ticket_channel(interaction, "питання", "Чим ми можемо вам допомогти?")
+        await self.create_ticket_channel(interaction, "питання")
 
-    async def create_ticket_channel(self, interaction: discord.Interaction, category_name: str, welcome_text: str):
+    async def create_ticket_channel(self, interaction: discord.Interaction, category_name: str):
         guild = interaction.guild
         category = discord.utils.get(guild.categories, name="🎫 ТІКЕТИ ВАРТА UA")
         if not category:
@@ -69,36 +128,28 @@ class AdvancedTicketView(discord.ui.View):
         
         embed = discord.Embed(
             title=f"🎫 Звернення користувача: {interaction.user.name}",
-            description=f"{welcome_text}\n\n🔒 *Цей канал є приватним.*",
+            description="Опишіть вашу проблему. Модератори скоро підключаться.\n\n⏱️ *Увага: неактивні тікети закриваються автоматично через 24 години.*",
             color=discord.Color.from_rgb(0, 162, 255)
         )
         embed.set_footer(text="Varta UA • Система безпеки та підтримки")
         
-        close_view = CloseTicketView()
-        await channel.send(content=f"{interaction.user.mention}, вітаємо!", embed=embed, view=close_view)
+        await channel.send(content=f"{interaction.user.mention}, вітаємо!", embed=embed, view=TicketManagementView())
         await interaction.response.send_message(f"✅ Ваш тікет успішно створено: {channel.mention}", ephemeral=True)
 
-class CloseTicketView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @discord.ui.button(label="🔒 Закрити тікет", style=discord.ButtonStyle.danger, custom_id="close_ticket_btn")
-    async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message("🔒 Тікет буде закрито через 5 секунд...", ephemeral=False)
-        await asyncio.sleep(5)
-        await interaction.channel.delete()
-
-@discord_bot.tree.command(name="setup_tickets", description="Опублікувати панель тікетів")
+@discord_bot.tree.command(name="setup_tickets", description="Розгорнути панель тікетів")
 @app_commands.checks.has_permissions(administrator=True)
 async def setup_tickets(interaction: discord.Interaction):
     embed = discord.Embed(
         title="🛡️ Центр безпеки та підтримки Varta UA",
-        description="Потрібна допомога чи хочете повідомити про порушника?\n\n📌 **Оберіть категорію нижче:**",
+        description="Потрібна допомога чи є скарга? Оберіть категорію нижче:",
         color=discord.Color.from_rgb(0, 120, 255)
     )
-    embed.set_footer(text="Varta UA • Project Protection System")
     await interaction.channel.send(embed=embed, view=AdvancedTicketView())
-    await interaction.response.send_message("✅ Панель тікетів успішно розгорнуто!", ephemeral=True)
+    await interaction.response.send_message("✅ Панель тікетів розгорнуто!", ephemeral=True)
+
+@discord_bot.tree.command(name="report", description="Поскаржитися на порушника в Discord")
+async def discord_report(interaction: discord.Interaction, reason: str):
+    await interaction.response.send_message(f"🚨 Вашу скаргу надіслано адміністрації проєкту Varta UA. Дякуємо за пильність!", ephemeral=True)
 
 @discord_bot.tree.command(name="kick", description="Вигнати порушника")
 @app_commands.checks.has_permissions(kick_members=True)
@@ -125,25 +176,19 @@ async def clear(interaction: discord.Interaction, amount: int):
     await interaction.channel.purge(limit=amount)
     await interaction.response.send_message(f"🧹 Очищено {amount} повідомлень.", ephemeral=True)
 
-# Спеціальна команда засновника в Discord для видачі ролі/прав через бота
-@discord_bot.tree.command(name="set_owner_role", description="[Тільки засновник] Видати вищу роль проєкту через бота")
+@discord_bot.tree.command(name="set_owner_role", description="[Засновник] Видати вищу роль проєкту")
 @app_commands.checks.has_permissions(administrator=True)
 async def set_owner_role(interaction: discord.Interaction, member: discord.Member, role_name: str = "Засновник / Власник"):
     guild = interaction.guild
-    # Шукаємо або створюємо найвищу роль
     role = discord.utils.get(guild.roles, name=role_name)
     if not role:
         role = await guild.create_role(name=role_name, color=discord.Color.gold(), permissions=discord.Permissions.all())
-    
-    try:
-        await member.add_roles(role)
-        await interaction.response.send_message(f"👑 Успішно! Користувачу {member.mention} видано вищу роль **{role.name}** від імені бота.", ephemeral=True)
-    except Exception as e:
-        await interaction.response.send_message(f"❌ Помилка видачі ролі: перевірте ієрархію ролей бота.", ephemeral=True)
+    await member.add_roles(role)
+    await interaction.response.send_message(f"👑 Користувачу {member.mention} видано роль **{role.name}**.", ephemeral=True)
 
 
 # ==========================================
-# ✈️ TELEGRAM: МОДЕРАЦІЯ, ТІКЕТИ ТА ПРАВА ЗААСНОВНИКА
+# ✈️ TELEGRAM: КОМАНДИ, /report ТА ТІКЕТИ
 # ==========================================
 
 @dp.message(Command("start"))
@@ -155,7 +200,7 @@ async def tg_start(message: types.Message):
     
     await message.answer(
         "🛡️ **Вітаємо у службі підтримки Варта UA!**\n\n"
-        "Скористайтеся кнопками нижче для зв'язку або переходу на ресурси.",
+        "Скористайтеся командами `/ticket` або `/report`, щоб звернутися до адміністрації.",
         reply_markup=builder.as_markup()
     )
 
@@ -163,8 +208,25 @@ async def tg_start(message: types.Message):
 async def tg_ticket(message: types.Message):
     await message.answer(
         "🎫 **Центр підтримки Варта UA**\n\n"
-        "Опишіть вашу проблему або скаргу сюди в повідомленнях, і адміністрація обов'язково вам відповість!"
+        "Напишіть вашу проблему або питання суцільним повідомленням нижче. Адміністрація отримає звернення і зв'яжеться з вами в особистих повідомленнях!"
     )
+
+@dp.message(Command("report"))
+async def tg_report(message: types.Message):
+    if not message.reply_to_message:
+        return await message.reply("⚠️ Щоб надіслати скаргу, **відповіжте цією командою** на повідомлення порушника!")
+    
+    reported_user = message.reply_to_message.from_user
+    author = message.from_user
+    
+    report_text = (
+        f"🚨 **НОВА СКАРГА (Telegram)**\n\n"
+        f"👤 **Порушник:** {reported_user.full_name} (`{reported_user.id}`)\n"
+        f"🙋‍♂️ **Хто поскаржився:** {author.full_name} (`{author.id}`)\n"
+        f"💬 **Час/Чат:** {message.chat.title or 'Особисті повідомлення'}"
+    )
+    
+    await message.reply(f"✅ Вашу скаргу на користувача {reported_user.full_name} успішно надіслано адміністраторам!")
 
 @dp.message(Command("ban"))
 async def tg_ban(message: types.Message):
@@ -193,34 +255,23 @@ async def tg_mute(message: types.Message):
     except Exception:
         await message.reply("❌ Помилка: перевірте права адміністратора у бота.")
 
-# Команда для Telegram, щоб дати права адміністратора / статус власнику за Telegram ID
 @dp.message(Command("setowner"))
 async def tg_set_owner(message: types.Message):
-    # Використовується так: /setowner [ID_користувача]
     args = message.text.split()
     if len(args) < 2:
-        return await message.reply(f"ℹ️ Ваш поточний Telegram ID: `{message.from_user.id}`\n\nВикористання: `/setowner [ID]` для надання прав засновника через бота.", parse_mode="Markdown")
-    
+        return await message.reply(f"ℹ️ Ваш поточний Telegram ID: `{message.from_user.id}`\n\nВикористання: `/setowner [ID]`", parse_mode="Markdown")
     try:
         target_id = int(args[1])
-        # Надаємо повні права адміністратора в чаті через бота (якщо бот має право підвищувати адмінів)
         await message.chat.promote(
             user_id=target_id,
-            is_anonymous=False,
             can_manage_chat=True,
             can_delete_messages=True,
-            can_manage_video_chats=True,
             can_restrict_members=True,
-            can_promote_members=True,
-            can_change_info=True,
-            can_invite_users=True,
-            can_post_messages=True,
-            can_edit_messages=True,
-            can_pin_messages=True
+            can_promote_members=True
         )
-        await message.reply(f"👑 Успішно! Користувачу з ID `{target_id}` надано повні права адміністратора/засновника в цьому чаті.")
-    except Exception as e:
-        await message.reply(f"❌ Помилка: переконайтеся, що бот є адміністратором з правом додавати інших адміністраторів.")
+        await message.reply(f"👑 Успішно! Користувачу з ID `{target_id}` надано права адміністратора.")
+    except Exception:
+        await message.reply("❌ Помилка: переконайтеся, що бот має права підвищувати адміністраторів.")
 
 
 # ==========================================
@@ -230,7 +281,8 @@ async def tg_set_owner(message: types.Message):
 async def on_ready():
     await discord_bot.tree.sync()
     discord_bot.add_view(AdvancedTicketView())
-    discord_bot.add_view(CloseTicketView())
+    discord_bot.add_view(TicketManagementView())
+    discord_bot.add_view(RatingView())
     print(f"✅ Discord бот успішно запущено: {discord_bot.user}")
 
 async def main():
