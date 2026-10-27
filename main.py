@@ -30,9 +30,12 @@ discord_bot = commands.Bot(command_prefix="!", intents=intents)
 tg_bot = Bot(token=TG_TOKEN)
 dp = Dispatcher()
 
+# Вкажи сюди свій Telegram ID або ID чату адміністраторів, куди надсилати тікети та скарги
+TG_ADMIN_CHAT_ID = 0  
+
 
 # ==========================================
-# 🛡️ DISCORD: ПРОДВИНУТА СИСТЕМА ТІКЕТІВ ТА ТРАНСКРИПТИ
+# 🛡️ DISCORD: РОЗШИРЕНА СИСТЕМА ТІКЕТІВ ТА МОДЕРАЦІЯ
 # ==========================================
 
 class TicketManagementView(discord.ui.View):
@@ -64,7 +67,6 @@ class RatingView(discord.ui.View):
         channel = interaction.channel
         guild = interaction.guild
         
-        # Збираємо історію повідомлень для транскрипту (як на твоєму скріншоті)
         messages_history = []
         async for message in channel.history(limit=200, oldest_first=True):
             messages_history.append(f"[{message.created_at.strftime('%Y-%m-%d %H:%M')}] {message.author}: {message.content}")
@@ -73,9 +75,7 @@ class RatingView(discord.ui.View):
         file_bytes = io.BytesIO(transcript_content.encode('utf-8'))
         file = discord.File(file_bytes, filename=f"transcript-{channel.name}.txt")
 
-        # Намагаємося відправити файл транскрипту користувачу в ЛС
         try:
-            # Шукаємо автора тікета за назвою каналу або відправляємо кліку
             embed_dm = discord.Embed(
                 title="📄 Транскрипт закритого тікета",
                 description=f"Сервер: **{guild.name}**\nОцінка роботи: **{rating}**\nДякуємо, що звернулися у Varta UA!",
@@ -163,9 +163,16 @@ async def setup_tickets(interaction: discord.Interaction):
     await interaction.channel.send(embed=embed, view=AdvancedTicketView())
     await interaction.response.send_message("✅ Панель тікетів розгорнуто!", ephemeral=True)
 
-@discord_bot.tree.command(name="report", description="Поскаржитися на порушника в Discord")
-async def discord_report(interaction: discord.Interaction, reason: str):
-    await interaction.response.send_message(f"🚨 Вашу скаргу надіслано адміністрації проєкту Varta UA. Дякуємо за пильність!", ephemeral=True)
+# Discord Модерація
+@discord_bot.tree.command(name="report", description="Викликати модерацію або поскаржитися на порушника")
+async def discord_report(interaction: discord.Interaction, member: discord.Member, reason: str):
+    await interaction.response.send_message(f"🚨 Вашу скаргу на користувача {member.mention} передано модераторам. Дякуємо!", ephemeral=True)
+
+@discord_bot.tree.command(name="say", description="[Адмін] Написати повідомлення від імені бота")
+@app_commands.checks.has_permissions(administrator=True)
+async def discord_say(interaction: discord.Interaction, text: str):
+    await interaction.channel.send(text)
+    await interaction.response.send_message("✅ Надіслано!", ephemeral=True)
 
 @discord_bot.tree.command(name="kick", description="Вигнати порушника")
 @app_commands.checks.has_permissions(kick_members=True)
@@ -179,6 +186,13 @@ async def ban(interaction: discord.Interaction, member: discord.Member, reason: 
     await member.ban(reason=reason)
     await interaction.response.send_message(f"⛔ Користувача {member.mention} заблоковано. Причина: {reason}")
 
+@discord_bot.tree.command(name="unban", description="Розблокувати користувача за ID")
+@app_commands.checks.has_permissions(ban_members=True)
+async def unban(interaction: discord.Interaction, user_id: str):
+    user = await discord_bot.fetch_user(int(user_id))
+    await interaction.guild.unban(user)
+    await interaction.response.send_message(f"✅ Користувача {user.name} розблоковано!")
+
 @discord_bot.tree.command(name="mute", description="Видати тайм-аут")
 @app_commands.checks.has_permissions(moderate_members=True)
 async def mute(interaction: discord.Interaction, member: discord.Member, minutes: int, reason: str = "Порушення порядку"):
@@ -186,13 +200,24 @@ async def mute(interaction: discord.Interaction, member: discord.Member, minutes
     await member.timeout(duration, reason=reason)
     await interaction.response.send_message(f"🔇 Користувача {member.mention} замучено на {minutes} хв.")
 
+@discord_bot.tree.command(name="unmute", description="Зняти тайм-аут")
+@app_commands.checks.has_permissions(moderate_members=True)
+async def unmute(interaction: discord.Interaction, member: discord.Member):
+    await member.timeout(None)
+    await interaction.response.send_message(f"🔊 З користувача {member.mention} знято тайм-аут.")
+
+@discord_bot.tree.command(name="warn", description="Видати попередження")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def warn(interaction: discord.Interaction, member: discord.Member, reason: str):
+    await interaction.response.send_message(f"⚠️ Користувач {member.mention} отримав попередження. Причина: {reason}")
+
 @discord_bot.tree.command(name="clear", description="Очистити чат")
 @app_commands.checks.has_permissions(manage_messages=True)
 async def clear(interaction: discord.Interaction, amount: int):
     await interaction.channel.purge(limit=amount)
     await interaction.response.send_message(f"🧹 Очищено {amount} повідомлень.", ephemeral=True)
 
-@discord_bot.tree.command(name="set_owner_role", description="[Засновник] Видати вищу роль проєкту")
+@discord_bot.tree.command(name="set_owner_role", description="[Засновник] Видати роль засновника")
 @app_commands.checks.has_permissions(administrator=True)
 async def set_owner_role(interaction: discord.Interaction, member: discord.Member, role_name: str = "Засновник / Власник"):
     guild = interaction.guild
@@ -204,19 +229,19 @@ async def set_owner_role(interaction: discord.Interaction, member: discord.Membe
 
 
 # ==========================================
-# ✈️ TELEGRAM: КОМАНДИ, /report ТА ТІКЕТИ
+# ✈️ TELEGRAM: МОДЕРАЦІЯ ТА КОМАНДИ
 # ==========================================
 
 @dp.message(Command("start"))
 async def tg_start(message: types.Message):
     builder = InlineKeyboardBuilder()
     builder.button(text="🌐 Наш Discord", url="https://discord.gg/9qBKQcXCuP")
-    builder.button(text="🎫 Створити тікет / Зв'язок", url="https://t.me/VartaUA_Robot")
+    builder.button(text="🎫 Підтримка / Тікет", url="https://t.me/VartaUA_Robot")
     builder.adjust(1)
     
     await message.answer(
         "🛡️ **Вітаємо у службі підтримки Варта UA!**\n\n"
-        "Скористайтеся командами `/ticket` або `/report`, щоб звернутися до адміністрації.",
+        "Скористайтеся командами `/ticket`, `/report`, `/ban`, `/mute`, `/say` для управління чатом.",
         reply_markup=builder.as_markup()
     )
 
@@ -224,18 +249,28 @@ async def tg_start(message: types.Message):
 async def tg_ticket(message: types.Message):
     await message.answer(
         "🎫 **Центр підтримки Варта UA**\n\n"
-        "Напишіть вашу проблему або питання суцільним повідомленням нижче. Адміністрація отримає звернення і зв'яжеться з вами в особистих повідомленнях!"
+        "Напишіть вашу проблему нижче, і адміністрація отримає ваше звернення!"
     )
 
 @dp.message(Command("report"))
 async def tg_report(message: types.Message):
     if not message.reply_to_message:
-        return await message.reply("⚠️ Щоб надіслати скаргу, **відповіжте цією командою** на повідомлення порушника!")
+        return await message.reply("⚠️ Щоб викликати модерацію або поскаржитися, **відповіжте цією командою** на повідомлення порушника!")
     
     reported_user = message.reply_to_message.from_user
-    author = message.from_user
-    
-    await message.reply(f"✅ Вашу скаргу на користувача {reported_user.full_name} успішно надіслано адміністраторам!")
+    await message.reply(f"🚨 Виклик модерації! Скарга на користувача {reported_user.full_name} передана адміністраторам.")
+
+@dp.message(Command("say"))
+async def tg_say(message: types.Message):
+    # Використання: /say [текст]
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        return await message.reply("⚠️ Напишіть текст після команди, наприклад: `/say Привіт усім!`")
+    try:
+        await message.delete()
+        await message.answer(args[1])
+    except Exception:
+        await message.reply(args[1])
 
 @dp.message(Command("ban"))
 async def tg_ban(message: types.Message):
@@ -246,9 +281,23 @@ async def tg_ban(message: types.Message):
         if member.status in ["administrator", "creator"]:
             target_user = message.reply_to_message.from_user
             await message.chat.ban(user_id=target_user.id)
-            await message.reply(f"⛔ Користувача {target_user.full_name} забанено!")
+            await message.reply(f"⛔ Користувача {target_user.full_name} забанено в чаті!")
     except Exception:
         await message.reply("❌ Помилка: перевірте права адміністратора у бота.")
+
+@dp.message(Command("unban"))
+async def tg_unban(message: types.Message):
+    args = message.text.split()
+    if len(args) < 2:
+        return await message.reply("⚠️ Використання: `/unban [ID_користувача]`")
+    try:
+        member = await message.chat.get_member(message.from_user.id)
+        if member.status in ["administrator", "creator"]:
+            target_id = int(args[1])
+            await message.chat.unban(user_id=target_id)
+            await message.reply(f"✅ Користувача з ID `{target_id}` розблоковано!")
+    except Exception:
+        await message.reply("❌ Помилка розблокування.")
 
 @dp.message(Command("mute"))
 async def tg_mute(message: types.Message):
@@ -262,7 +311,31 @@ async def tg_mute(message: types.Message):
             await message.chat.restrict(user_id=target_user.id, permissions=permissions)
             await message.reply(f"🔇 Користувача {target_user.full_name} замучено!")
     except Exception:
-        await message.reply("❌ Помилка: перевірте права адміністратора у бота.")
+        await message.reply("❌ Помилка модерації.")
+
+@dp.message(Command("unmute"))
+async def tg_unmute(message: types.Message):
+    if not message.reply_to_message:
+        return await message.reply("⚠️ Відповіжте цією командою на повідомлення користувача!")
+    try:
+        member = await message.chat.get_member(message.from_user.id)
+        if member.status in ["administrator", "creator"]:
+            target_user = message.reply_to_message.from_user
+            permissions = types.ChatPermissions(
+                can_send_messages=True, can_send_media_messages=True, 
+                can_send_other_messages=True, can_add_web_page_previews=True
+            )
+            await message.chat.restrict(user_id=target_user.id, permissions=permissions)
+            await message.reply(f"🔊 З користувача {target_user.full_name} знято мут!")
+    except Exception:
+        await message.reply("❌ Помилка.")
+
+@dp.message(Command("warn"))
+async def tg_warn(message: types.Message):
+    if not message.reply_to_message:
+        return await message.reply("⚠️ Відповіжте цією командою на повідомлення порушника для попередження!")
+    target_user = message.reply_to_message.from_user
+    await message.reply(f"⚠️ Користувач {target_user.full_name} отримав попередження від адміністрації Varta UA.")
 
 @dp.message(Command("setowner"))
 async def tg_set_owner(message: types.Message):
@@ -278,7 +351,7 @@ async def tg_set_owner(message: types.Message):
             can_restrict_members=True,
             can_promote_members=True
         )
-        await message.reply(f"👑 Успішно! Користувачу з ID `{target_id}` надано права адміністратора.")
+        await message.reply(f"👑 Успішно! Користувачу з ID `{target_id}` надано повні права адміністратора.")
     except Exception:
         await message.reply("❌ Помилка: переконайтеся, що бот має права підвищувати адміністраторів.")
 
