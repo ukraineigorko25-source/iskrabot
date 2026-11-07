@@ -2,3 +2,4 @@ app = "iskrabot"
 primary_region = "ams"
 
 [build]
+  command = "python main.py"
