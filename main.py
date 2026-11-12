@@ -35,9 +35,7 @@ class ReportModal(discord.ui.Modal, title="Надіслати скаргу"):
       max_length=1000,
   )
 
-  async def on_submit(self, interaction: discord.Response):
-    # Можна налаштувати ID каналу куди надсилатимуться скарги
-    # Наприклад, створити канал для адміністрації
+  async def on_submit(self, interaction: discord.Interaction):
     embed = discord.Embed(
         title="🚨 Нова скарга",
         description=self.report_reason.value,
@@ -47,7 +45,6 @@ class ReportModal(discord.ui.Modal, title="Надіслати скаргу"):
         name=interaction.user.name, icon_url=interaction.user.avatar.url
     )
 
-    # Відправляємо відповідь користувачу
     await interaction.response.send_message(
         "Вашу скаргу успішно надіслано адміністрації!", ephemeral=True
     )
@@ -61,7 +58,7 @@ async def report(interaction: discord.Interaction):
 
 
 # ==========================================
-# 2. КОМАНДИ МОДЕРАЦІЇ (Мут, Бан, Варн)
+# 2. КОМАНДИ МОДЕРАЦІЇ (Мут, Бан, Розмут)
 # ==========================================
 
 
@@ -71,7 +68,7 @@ async def ban(
     interaction: discord.Interaction,
     member: discord.Member,
     *,
-    reason: str = "Причина не вказана"
+    reason: str = "Причина не вказана",
 ):
   await member.ban(reason=reason)
   await interaction.response.send_message(
@@ -87,7 +84,7 @@ async def mute(
     member: discord.Member,
     minutes: int,
     *,
-    reason: str = "Причина не вказана"
+    reason: str = "Причина не вказана",
 ):
   duration = discord.utils.utcnow() + discord.timedelta(minutes=minutes)
   await member.timeout(duration, reason=reason)
@@ -116,13 +113,12 @@ async def unmute(interaction: discord.Interaction, member: discord.Member):
     name="ai", description="Поставити запитання AI асистенту в чаті"
 )
 async def ai_chat(interaction: discord.Interaction, *, prompt: str):
-  await interaction.response.defer()  # Дає час на відповідь, якщо запит довгий
+  await interaction.response.defer()  # Дає час на відповідь
 
-  # Тут ти можеш підключити свій API (наприклад, OpenAI / Google Gemini)
-  # Поки що зробимо базову відповідь-заглушку, яку ти зможеш замінити на свій запит до API:
+  # Тут згодом можна підключити реальний API (OpenAI / Gemini)
   ai_response = (
-      f"🤖 **AI Агент:** Я отримав твоє запитування: *'{prompt}'*. (Сюди"
-      " підключається твій код запиту до API моделі)."
+      f"🤖 **AI Агент:** Я отримав твоє запитання: *'{prompt}'*. (Готовий до"
+      " підключення твого API)."
   )
 
   await interaction.followup.send(ai_response)
