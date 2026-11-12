@@ -17,9 +17,7 @@ gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 @bot.event
 async def on_ready():
-  print(
-      f"Бот {bot.user} успішно запущений і підключений до Gemini AI!"
-  )
+  print(f"Бот {bot.user} успішно запущений і підключений до Gemini AI!")
   try:
     synced = await bot.tree.sync()
     print(f"Синхронізовано слеш-команд: {len(synced)}")
@@ -36,25 +34,21 @@ async def on_ready():
     name="ai", description="Поставити запитання штучному інтелекту Gemini"
 )
 async def ai_chat(interaction: discord.Interaction, *, prompt: str):
-  # Повідомляємо Discord, що бот обробляє запит (щоб не було тайм-ауту)
   await interaction.response.defer()
 
   try:
-    # Використовуємо швидку та розумну модель gemini-2.5-flash
+    # Використовуємо актуальну модель gemini-3.8-flash за рекомендацією API
     response = gemini_client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-3.8-flash",
         contents=prompt,
     )
 
     reply_text = response.text
 
-    # Discord має ліміт на довжину повідомлення (2000 символів), обрізаємо за потреби
     if len(reply_text) > 2000:
       reply_text = reply_text[:1997] + "..."
 
-    await interaction.followup.send(
-        f"🤖 **Питання:** {prompt}\n\n{reply_text}"
-    )
+    await interaction.followup.send(f"🤖 **Питання:** {prompt}\n\n{reply_text}")
 
   except Exception as e:
     await interaction.followup.send(
