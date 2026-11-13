@@ -139,27 +139,23 @@ async def setup_tickets(interaction: discord.Interaction):
 
 
 @bot.tree.command(
-    name="report",
-    description="Викликати модерацію через порушення у Discord чаті",
+    name="report", description="Екстрено викликати модерацію через порушення"
 )
-async def report(
-    interaction: discord.Interaction,
-    member: discord.Member,
-    *,
-    reason: str,
-):
+async def report(interaction: discord.Interaction, *, reason: str):
   embed = discord.Embed(
       title="🚨 Екстрений виклик модерації", color=discord.Color.red()
   )
   embed.add_field(
       name="Хто викликав", value=interaction.user.mention, inline=True
   )
-  embed.add_field(name="Порушник", value=member.mention, inline=True)
+  embed.add_field(
+      name="Поточний канал", value=interaction.channel.mention, inline=True
+  )
   embed.add_field(name="Причина / Ситуація", value=reason, inline=False)
   embed.set_footer(text="Модератори отримали сповіщення.")
 
   await interaction.channel.send(
-      "@here Увага, зафіксовано репорт на порушника!", embed=embed
+      "@here Увага, зафіксовано виклик модерації!", embed=embed
   )
   await interaction.response.send_message(
       "✅ Виклик модераторів успішно надіслано!", ephemeral=True
@@ -167,7 +163,7 @@ async def report(
 
 
 # ==========================================
-# 4. ПАНЕЛЬ СКАРГ У ФОРУМ (Кнопки для форумів)
+# 4. СИСТЕМА СКАРГ У ФОРУМ (Кнопки та категорії)
 # ==========================================
 
 
@@ -178,7 +174,7 @@ class ForumReportSelect(discord.ui.Select):
         discord.SelectOption(
             label="Скарги на гравця",
             value="гравц",
-            description="Створити тему у фомумі гравців",
+            description="Створити тему у форумі гравців",
             emoji="👤",
         ),
         discord.SelectOption(
@@ -216,7 +212,7 @@ class ForumReportView(discord.ui.View):
     self.add_item(ForumReportSelect())
 
 
-class ForumReportModal(discord.ui.Modal, title="Форма подачі скарги у форум"):
+class ForumReportModal(discord.ui.Modal, title="Подання скарги у форум"):
   target_user = discord.ui.TextInput(
       label="Нік порушника / ID",
       placeholder="Наприклад: Dmytro_Collins або ID 123",
