@@ -4,17 +4,15 @@ from discord import app_commands
 from discord.ext import commands
 from google import genai
 
-# Ініціалізація бота
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# База даних попереджень у пам'яті
 warnings_db = {}
 
-# Підключення до Gemini API
+# Ініціалізація клієнта Gemini
 gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 
@@ -29,7 +27,29 @@ async def on_ready():
 
 
 # ==========================================
-# 1. СИСТЕМА ТІКЕТІВ
+# 1. КОМАНДА ПИСАТИ ВІД ІМЕНІ БОТА (/say)
+# ==========================================
+
+
+@bot.tree.command(
+    name="say", description="Написати повідомлення від імені бота у вказаний канал"
+)
+@app_commands.default_permissions(administrator=True)
+async def say(
+    interaction: discord.Interaction,
+    channel: discord.TextChannel,
+    *,
+    text: str,
+):
+  await channel.send(text)
+  await interaction.response.send_message(
+      f"✅ Повідомлення успішно надіслано в канал {channel.mention}!",
+      ephemeral=True,
+  )
+
+
+# ==========================================
+# 2. СИСТЕМА ТІКЕТІВ З КНОПКАМИ
 # ==========================================
 
 
@@ -114,7 +134,7 @@ async def setup_tickets(interaction: discord.Interaction):
 
 
 # ==========================================
-# 2. СИСТЕМА СКАРГ
+# 3. СИСТЕМА СКАРГ У ФОРУМІ
 # ==========================================
 
 
@@ -178,20 +198,59 @@ class ReportDetailsModal(discord.ui.Modal, title="Оформлення скар�
     self.category = category
 
   async def on_submit(self, interaction: discord.Interaction):
+    guild = interaction.guild
+
+    forum_channel = None
+    for channel in guild.channels:
+      if isinstance(channel, discord.ForumChannel):
+        if (
+            "скарг" in channel.name.lower()
+            or "покаран" in channel.name.lower()
+            or "поруш" in channel.name.lower()
+        ):
+          forum_channel = channel
+          break
+    if not forum_channel:
+      for channel in guild.channels:
+        if isinstance(channel, discord.ForumChannel):
+          forum_channel = channel
+          break
+
+    if not forum_channel:
+      await interaction.response.send_message(
+          "❌ Помилка: На сервері не знайдено жодного каналу типу **Форум**!",
+          ephemeral=True,
+      )
+      return
+
     embed = discord.Embed(
-        title=f"🚨 Нова скарга: {self.category}", color=discord.Color.red()
+        title=f"🚨 {self.category}", color=discord.Color.red()
     )
-    embed.add_field(name="Скаргу подав", value=interaction.user.mention, inline=True)
-    embed.add_field(name="Порушник", value=self.target_user.value, inline=True)
-    embed.add_field(name="Опис / Докази", value=self.reason.value, inline=False)
+    embed.add_field(
+        name="👤 Скаргу подав", value=interaction.user.mention, inline=True
+    )
+    embed.add_field(
+        name="🎯 Порушник / ID", value=self.target_user.value, inline=True
+    )
+    embed.add_field(name="📄 Суть скарги та докази", value=self.reason.value, inline=False)
+    embed.set_footer(text=f"ID автора: {interaction.user.id}")
+
+    thread_title = (
+        f"[{self.category}] На {self.target_user.value} від"
+        f" {interaction.user.name}"
+    )
+    if len(thread_title) > 100:
+      thread_title = thread_title[:97] + "..."
+
+    await forum_channel.create_thread(name=thread_title, embed=embed)
 
     await interaction.response.send_message(
-        "Вашу скаргу успішно надіслано на розгляд!", ephemeral=True
+        "✅ Вашу скаргу успішно надіслано до форуму скарг!", ephemeral=True
     )
 
 
 @bot.tree.command(
-    name="report", description="Надіслати скаргу через меню категорій"
+    name="report", description="Надіслати скаргу у форум через меню категорій"
 )
 async def report(interaction: discord.Interaction):
   view = ReportSelectView()
@@ -201,7 +260,7 @@ async def report(interaction: discord.Interaction):
 
 
 # ==========================================
-# 3. КОМАНДИ МОДЕРАЦІЇ
+# 4. КОМАНДИ МОДЕРАЦІЇ
 # ==========================================
 
 
@@ -213,11 +272,16 @@ async def ban(
     *,
     reason: str = "Причина не вказана",
 ):
-  await member.ban(reason=reason)
-  await interaction.response.send_message(
-      f"✅ Користувача {member.mention} успішно забанено. Причина: {reason}",
-      ephemeral=True,
-  )
+  try:
+    await member.ban(reason=reason)
+    await interaction.response.send_message(
+        f"✅ Користувача {member.mention} успішно забанено. Причина: {reason}",
+        ephemeral=True,
+    )
+  except Exception as e:
+    await interaction.response.send_message(
+        f"❌ Не вдалося забанити гравця: `{e}`", ephemeral=True
+    )
 
 
 @bot.tree.command(name="mute", description="Видати тайм-аут учаснику")
@@ -292,7 +356,7 @@ async def warnlog(interaction: discord.Interaction, member: discord.Member):
 
 
 # ==========================================
-# 4. AI АГЕНТ (GEMINI)
+# 5. AI АГЕНТ (GEMINI)
 # ==========================================
 
 
@@ -303,9 +367,8 @@ async def ai_chat(interaction: discord.Interaction, *, prompt: str):
   await interaction.response.defer()
 
   try:
-    # Використовуємо стабільну модель gemini-1.5-flash без ризику перевантажень
     response = gemini_client.models.generate_content(
-        model="gemini-1.5-flash",
+        model="gemini-2.5-flash",
         contents=prompt,
     )
 
@@ -317,7 +380,7 @@ async def ai_chat(interaction: discord.Interaction, *, prompt: str):
 
   except Exception as e:
     await interaction.followup.send(
-        f"❌ Виникла помилка при зверненні до Gemini AI: `{e}`"
+        f"❌ Помилка AI: `{e}`\nСпробуйте написати запит іще раз."
     )
 
 
