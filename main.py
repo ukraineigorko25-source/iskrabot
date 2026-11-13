@@ -12,7 +12,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 warnings_db = {}
 
-# Ініціалізація клієнта Gemini
+# Ініціалізація клієнта Gemini з актуальною моделлю
 gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 
@@ -134,68 +134,105 @@ async def setup_tickets(interaction: discord.Interaction):
 
 
 # ==========================================
-# 3. СИСТЕМА СКАРГ У ФОРУМІ
+# 3. ВИКЛИК МОДЕРАЦІЇ (/report у чаті)
 # ==========================================
 
 
-class ReportSelect(discord.ui.Select):
+@bot.tree.command(
+    name="report",
+    description="Викликати модерацію через порушення у Discord чаті",
+)
+async def report(
+    interaction: discord.Interaction,
+    member: discord.Member,
+    *,
+    reason: str,
+):
+  embed = discord.Embed(
+      title="🚨 Екстрений виклик модерації", color=discord.Color.red()
+  )
+  embed.add_field(
+      name="Хто викликав", value=interaction.user.mention, inline=True
+  )
+  embed.add_field(name="Порушник", value=member.mention, inline=True)
+  embed.add_field(name="Причина / Ситуація", value=reason, inline=False)
+  embed.set_footer(text="Модератори отримали сповіщення.")
+
+  await interaction.channel.send(
+      "@here Увага, зафіксовано репорт на порушника!", embed=embed
+  )
+  await interaction.response.send_message(
+      "✅ Виклик модераторів успішно надіслано!", ephemeral=True
+  )
+
+
+# ==========================================
+# 4. ПАНЕЛЬ СКАРГ У ФОРУМ (Кнопки для форумів)
+# ==========================================
+
+
+class ForumReportSelect(discord.ui.Select):
 
   def __init__(self):
     options = [
         discord.SelectOption(
-            label="Скарги на гравців",
-            description="Порушення правил від гравців",
+            label="Скарги на гравця",
+            value="гравц",
+            description="Створити тему у фомумі гравців",
             emoji="👤",
         ),
         discord.SelectOption(
-            label="Скарги на адміністрацію",
-            description="Питання до роботи адмінів",
+            label="Скарги на адміністраторів",
+            value="адміністратор",
+            description="Створити тему у форумі адмінів",
             emoji="🛡️",
         ),
         discord.SelectOption(
             label="Скарги на лідерів",
-            description="Порушення від лідерів фракцій",
-            emoji="👑",
+            value="лідер",
+            description="Створити тему у форумі лідерів",
+            emoji="⭐",
         ),
         discord.SelectOption(
-            label="Скарги на держ. структури",
-            description="Проблеми у державних організаціях",
-            emoji="🏛️",
+            label="Скарги на керівництво",
+            value="керівництв",
+            description="Створити тему у форумі керівництва",
+            emoji="👑",
         ),
     ]
     super().__init__(
-        placeholder="Оберіть категорію скарги...", options=options
+        placeholder="Оберіть розділ для скарги у форум...", options=options
     )
 
   async def callback(self, interaction: discord.Interaction):
-    modal = ReportDetailsModal(category=self.values[0])
+    modal = ForumReportModal(category_keyword=self.values[0])
     await interaction.response.send_modal(modal)
 
 
-class ReportSelectView(discord.ui.View):
+class ForumReportView(discord.ui.View):
 
   def __init__(self):
     super().__init__(timeout=None)
-    self.add_item(ReportSelect())
+    self.add_item(ForumReportSelect())
 
 
-class ReportDetailsModal(discord.ui.Modal, title="Оформлення скарги"):
+class ForumReportModal(discord.ui.Modal, title="Форма подачі скарги у форум"):
   target_user = discord.ui.TextInput(
       label="Нік порушника / ID",
       placeholder="Наприклад: Dmytro_Collins або ID 123",
       required=True,
   )
   reason = discord.ui.TextInput(
-      label="Суть скарги та докази",
+      label="Опис ситуації та докази",
       style=discord.TextStyle.paragraph,
-      placeholder="Опишіть ситуацію детально...",
+      placeholder="Опишіть детально та вкажіть посилання на докази...",
       required=True,
       max_length=1000,
   )
 
-  def __init__(self, category: str):
+  def __init__(self, category_keyword: str):
     super().__init__()
-    self.category = category
+    self.category_keyword = category_keyword
 
   async def on_submit(self, interaction: discord.Interaction):
     guild = interaction.guild
@@ -203,13 +240,10 @@ class ReportDetailsModal(discord.ui.Modal, title="Оформлення скар�
     forum_channel = None
     for channel in guild.channels:
       if isinstance(channel, discord.ForumChannel):
-        if (
-            "скарг" in channel.name.lower()
-            or "покаран" in channel.name.lower()
-            or "поруш" in channel.name.lower()
-        ):
+        if self.category_keyword in channel.name.lower():
           forum_channel = channel
           break
+
     if not forum_channel:
       for channel in guild.channels:
         if isinstance(channel, discord.ForumChannel):
@@ -218,49 +252,53 @@ class ReportDetailsModal(discord.ui.Modal, title="Оформлення скар�
 
     if not forum_channel:
       await interaction.response.send_message(
-          "❌ Помилка: На сервері не знайдено жодного каналу типу **Форум**!",
+          "❌ Помилка: Не знайдено жодного каналу-форуму для скарг!",
           ephemeral=True,
       )
       return
 
-    embed = discord.Embed(
-        title=f"🚨 {self.category}", color=discord.Color.red()
-    )
+    embed = discord.Embed(title="🚨 Офіційна скарга", color=discord.Color.red())
     embed.add_field(
         name="👤 Скаргу подав", value=interaction.user.mention, inline=True
     )
     embed.add_field(
         name="🎯 Порушник / ID", value=self.target_user.value, inline=True
     )
-    embed.add_field(name="📄 Суть скарги та докази", value=self.reason.value, inline=False)
-    embed.set_footer(text=f"ID автора: {interaction.user.id}")
+    embed.add_field(name="📄 Суть та докази", value=self.reason.value, inline=False)
 
-    thread_title = (
-        f"[{self.category}] На {self.target_user.value} від"
-        f" {interaction.user.name}"
-    )
+    thread_title = f"Скарги на {self.target_user.value} від {interaction.user.name}"
     if len(thread_title) > 100:
       thread_title = thread_title[:97] + "..."
 
     await forum_channel.create_thread(name=thread_title, embed=embed)
-
     await interaction.response.send_message(
-        "✅ Вашу скаргу успішно надіслано до форуму скарг!", ephemeral=True
+        f"✅ Вашу скаргу успішно опубліковано у форум **#{forum_channel.name}**!",
+        ephemeral=True,
     )
 
 
 @bot.tree.command(
-    name="report", description="Надіслати скаргу у форум через меню категорій"
+    name="setup_forum_report",
+    description="Надіслати панель подачі скарг у форум у канал",
 )
-async def report(interaction: discord.Interaction):
-  view = ReportSelectView()
+@app_commands.default_permissions(administrator=True)
+async def setup_forum_report(interaction: discord.Interaction):
+  embed = discord.Embed(
+      title="📋 Подача скарг у форум",
+      description=(
+          "Оберіть у меню нижче категорію, щоб подати скаргу через форму та"
+          " автоматично створити тему у відповідному форумі."
+      ),
+      color=discord.Color.dark_red(),
+  )
+  await interaction.channel.send(embed=embed, view=ForumReportView())
   await interaction.response.send_message(
-      "Оберіть категорію для вашої скарги:", view=view, ephemeral=True
+      "Панель скарг на форум успішно надіслано!", ephemeral=True
   )
 
 
 # ==========================================
-# 4. КОМАНДИ МОДЕРАЦІЇ
+# 5. КОМАНДИ МОДЕРАЦІЇ
 # ==========================================
 
 
@@ -356,7 +394,7 @@ async def warnlog(interaction: discord.Interaction, member: discord.Member):
 
 
 # ==========================================
-# 5. AI АГЕНТ (GEMINI)
+# 6. AI АГЕНТ (GEMINI)
 # ==========================================
 
 
@@ -368,7 +406,7 @@ async def ai_chat(interaction: discord.Interaction, *, prompt: str):
 
   try:
     response = gemini_client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-3.8-flash",
         contents=prompt,
     )
 
