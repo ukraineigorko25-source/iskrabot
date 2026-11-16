@@ -53,7 +53,7 @@ async def say(
 
 
 # ==========================================
-# 2. СИСТЕМА ТІКЕТІВ З КНОПКАМИ ТА ПЕРЕДАЧЕЮ
+# 2. СИСТЕМА ТІКЕТІВ З КНОПКАМИ ТА ОЦІНКОЮ
 # ==========================================
 
 
@@ -98,33 +98,90 @@ class TicketView(discord.ui.View):
     )
 
 
+class TicketFeedbackView(discord.ui.View):
+  """Меню оцінки роботи модератора після закриття тікета"""
+
+  def __init__(self, ticket_author: discord.Member, channel_name: str):
+    super().__init__(timeout=60)
+    self.ticket_author = ticket_author
+    self.channel_name = channel_name
+
+  async def send_log_to_dm(self, rating: str, interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="🔒 Закритий тікет — Звіт та Оцінка",
+        color=discord.Color.blurple(),
+    )
+    embed.add_field(name="📁 Назва тікета", value=self.channel_name, inline=False)
+    embed.add_field(name="👤 Створив", value=self.ticket_author.mention, inline=True)
+    embed.add_field(name="⭐ Оцінка", value=rating, inline=True)
+    embed.set_footer(text="Архів логів безпеки Varta UA")
+
+    # Надсилаємо гравцю в ЛС
+    try:
+      await self.ticket_author.send(embed=embed)
+    except Exception:
+      pass
+
+    # Надсилаємо модератору, який закрив, у ЛС
+    try:
+      await interaction.user.send(embed=embed)
+    except Exception:
+      pass
+
+  @discord.ui.button(label="Відмінно ⭐", style=discord.ButtonStyle.green, custom_id="rate_5")
+  async def rate_great(self, interaction: discord.Interaction, button: discord.ui.Button):
+    await self.send_log_to_dm("Відмінно ⭐", interaction)
+    await interaction.response.send_message("Дякуємо за оцінку! Канал буде видалено.", ephemeral=True)
+    await interaction.channel.delete()
+
+  @discord.ui.button(label="Середньо ⚡", style=discord.ButtonStyle.blurple, custom_id="rate_3")
+  async def rate_mid(self, interaction: discord.Interaction, button: discord.ui.Button):
+    await self.send_log_to_dm("Середньо ⚡", interaction)
+    await interaction.response.send_message("Дякуємо за відгук! Канал буде видалено.", ephemeral=True)
+    await interaction.channel.delete()
+
+  @discord.ui.button(label="Погано ❌", style=discord.ButtonStyle.red, custom_id="rate_1")
+  async def rate_bad(self, interaction: discord.Interaction, button: discord.ui.Button):
+    await self.send_log_to_dm("Погано ❌", interaction)
+    await interaction.response.send_message("Дякуємо за відгук! Канал буде видалено.", ephemeral=True)
+    await interaction.channel.delete()
+
+
 class TicketManageView(discord.ui.View):
 
   def __init__(self):
     super().__init__(timeout=None)
 
   @discord.ui.button(
-      label="Передати модератору",
-      style=discord.ButtonStyle.blurple,
-      custom_id="transfer_moderator",
-      emoji="🛡️",
+      label="Взяти тікет",
+      style=discord.ButtonStyle.green,
+      custom_id="claim_ticket",
+      emoji="🙋‍♂️",
   )
-  async def transfer_moderator(
+  async def claim_ticket(
       self, interaction: discord.Interaction, button: discord.ui.Button
   ):
-    # Шукаємо роль модератора (можна змінити назву на ту, яка у вас на сервері)
-    role = discord.utils.get(interaction.guild.roles, name="Команда Модерації (Discord)")
-    role_mention = role.mention if role else "@Команда Модерації (Discord)"
-    
-    await interaction.channel.send(
-        f"📢 Увага! Тікет передано на розгляд модераторам: {role_mention}"
-    )
     await interaction.response.send_message(
-        "✅ Тікет успішно передано модераторам!", ephemeral=True
+        f"✅ Тікет взяв у роботу модератор: {interaction.user.mention}"
     )
 
   @discord.ui.button(
-      label="Передати вищому модератору",
+      label="Передати модератору",
+      style=discord.ButtonStyle.blurple,
+      custom_id="transfer_mod",
+      emoji="🛡️",
+  )
+  async def transfer_mod(
+      self, interaction: discord.Interaction, button: discord.ui.Button
+  ):
+    role = discord.utils.get(interaction.guild.roles, name="Команда Модерації (Discord)")
+    role_mention = role.mention if role else "@Команда Модерації (Discord)"
+    await interaction.response.send_message(
+        f"📢 Тікет передано до складу модерації: {role_mention}"
+    )
+
+  @discord.ui.button(
+      label="Передати Discord Manager",
       style=discord.ButtonStyle.grey,
       custom_id="transfer_higher_mod",
       emoji="⭐",
@@ -132,15 +189,10 @@ class TicketManageView(discord.ui.View):
   async def transfer_higher_mod(
       self, interaction: discord.Interaction, button: discord.ui.Button
   ):
-    # Шукаємо ролі вищого складу (Discord Manager / Staff тощо)
     role = discord.utils.get(interaction.guild.roles, name="Discord Manager")
     role_mention = role.mention if role else "@Discord Manager"
-
-    await interaction.channel.send(
-        f"🚨 Увага! Тікет передано вищому складу (Discord Manager): {role_mention}"
-    )
     await interaction.response.send_message(
-        "✅ Тікет успішно передано вищому модератору!", ephemeral=True
+        f"🚨 Тікет передано вищому керівництву: {role_mention}"
     )
 
   @discord.ui.button(
@@ -152,11 +204,13 @@ class TicketManageView(discord.ui.View):
   async def close_ticket(
       self, interaction: discord.Interaction, button: discord.ui.Button
   ):
-    await interaction.response.send_message("Канал буде видалено через 5 секунд...")
-    import asyncio
-
-    await asyncio.sleep(5)
-    await interaction.channel.delete()
+    # Шукаємо автора тікета за назвою каналу або беремо interaction.user для прикладу
+    feedback_view = TicketFeedbackView(ticket_author=interaction.user, channel_name=interaction.channel.name)
+    await interaction.response.send_message(
+        "🔒 **Тікет закрито.** Оберіть оцінку роботи модерації нижче:",
+        view=feedback_view,
+        ephemeral=False
+    )
 
 
 @bot.tree.command(
@@ -167,7 +221,7 @@ async def setup_tickets(interaction: discord.Interaction):
   embed = discord.Embed(
       title="🎟️ Система підтримки та тікетів",
       description=(
-          "Натисніть кнопку нижче, щоб відкрити приватний тікет із адміністрацією."
+          "Натисніть кнопку нижче, щоб відкрити приватний тікет із модерацією."
       ),
       color=discord.Color.blurple(),
   )
@@ -178,7 +232,22 @@ async def setup_tickets(interaction: discord.Interaction):
 
 
 # ==========================================
-# 3. ВИКЛИК МОДЕРАЦІЇ (/report у чаті)
+# 3. ДОПОМІЖНА ФУНКЦІЯ ЛОГУВАННЯ ПОКАРАНЬ
+# ==========================================
+
+async def send_punishment_log(guild: discord.Guild, text: str):
+  """Надсилає лог покарання у канал 'видача-покарань'"""
+  for channel in guild.text_channels:
+    if "видача-покарань" in channel.name.lower():
+      try:
+        await channel.send(text)
+        break
+      except Exception:
+        pass
+
+
+# ==========================================
+# 4. ВИКЛИК МОДЕРАЦІЇ (/report у чаті)
 # ==========================================
 
 
@@ -186,6 +255,10 @@ async def setup_tickets(interaction: discord.Interaction):
     name="report", description="Екстрено викликати модерацію через порушення"
 )
 async def report(interaction: discord.Interaction, *, reason: str):
+  await interaction.response.send_message(
+      "✅ Виклик модераторів успішно надіслано!", ephemeral=True
+  )
+
   embed = discord.Embed(
       title="🚨 Екстрений виклик модерації", color=discord.Color.red()
   )
@@ -198,151 +271,16 @@ async def report(interaction: discord.Interaction, *, reason: str):
   embed.add_field(name="Причина / Ситуація", value=reason, inline=False)
   embed.set_footer(text="Модератори отримали сповіщення.")
 
-  # Тегаємо конкретну роль замість @here (як на вашому скріншоті)
   role = discord.utils.get(interaction.guild.roles, name="Команда Модерації (Discord)")
   role_mention = role.mention if role else "@Команда Модерації (Discord)"
 
   await interaction.channel.send(
       f"{role_mention} Увага, зафіксовано виклик модерації!", embed=embed
   )
-  await interaction.response.send_message(
-      "✅ Виклик модераторів успішно надіслано!", ephemeral=True
-  )
 
 
 # ==========================================
-# 4. СИСТЕМА СКАРГ У ФОРУМ (Кнопки та категорії)
-# ==========================================
-
-
-class ForumReportSelect(discord.ui.Select):
-
-  def __init__(self):
-    options = [
-        discord.SelectOption(
-            label="Скарги на гравця",
-            value="гравц",
-            description="Створити тему у форумі гравців",
-            emoji="👤",
-        ),
-        discord.SelectOption(
-            label="Скарги на адміністраторів",
-            value="адміністратор",
-            description="Створити тему у форумі адмінів",
-            emoji="🛡️",
-        ),
-        discord.SelectOption(
-            label="Скарги на лідерів",
-            value="лідер",
-            description="Створити тему у форумі лідерів",
-            emoji="⭐",
-        ),
-        discord.SelectOption(
-            label="Скарги на керівництво",
-            value="керівництв",
-            description="Створити тему у форумі керівництва",
-            emoji="👑",
-        ),
-    ]
-    super().__init__(
-        placeholder="Оберіть розділ для скарги у форум...", options=options
-    )
-
-  async def callback(self, interaction: discord.Interaction):
-    modal = ForumReportModal(category_keyword=self.values[0])
-    await interaction.response.send_modal(modal)
-
-
-class ForumReportView(discord.ui.View):
-
-  def __init__(self):
-    super().__init__(timeout=None)
-    self.add_item(ForumReportSelect())
-
-
-class ForumReportModal(discord.ui.Modal, title="Подання скарги у форум"):
-  target_user = discord.ui.TextInput(
-      label="Нік порушника / ID",
-      placeholder="Наприклад: Dmytro_Collins або ID 123",
-      required=True,
-  )
-  reason = discord.ui.TextInput(
-      label="Опис ситуації та докази",
-      style=discord.TextStyle.paragraph,
-      placeholder="Опишіть детально та вкажіть посилання на докази...",
-      required=True,
-      max_length=1000,
-  )
-
-  def __init__(self, category_keyword: str):
-    super().__init__()
-    self.category_keyword = category_keyword
-
-  async def on_submit(self, interaction: discord.Interaction):
-    guild = interaction.guild
-
-    forum_channel = None
-    for channel in guild.channels:
-      if isinstance(channel, discord.ForumChannel):
-        if self.category_keyword in channel.name.lower():
-          forum_channel = channel
-          break
-
-    if not forum_channel:
-      for channel in guild.channels:
-        if isinstance(channel, discord.ForumChannel):
-          forum_channel = channel
-          break
-
-    if not forum_channel:
-      await interaction.response.send_message(
-          "❌ Помилка: Не знайдено жодного каналу-форуму для скарг!",
-          ephemeral=True,
-      )
-      return
-
-    embed = discord.Embed(title="🚨 Офіційна скарга", color=discord.Color.red())
-    embed.add_field(
-        name="👤 Скаргу подав", value=interaction.user.mention, inline=True
-    )
-    embed.add_field(
-        name="🎯 Порушник / ID", value=self.target_user.value, inline=True
-    )
-    embed.add_field(name="📄 Суть та докази", value=self.reason.value, inline=False)
-
-    thread_title = f"Скарги на {self.target_user.value} від {interaction.user.name}"
-    if len(thread_title) > 100:
-      thread_title = thread_title[:97] + "..."
-
-    await forum_channel.create_thread(name=thread_title, embed=embed)
-    await interaction.response.send_message(
-        f"✅ Вашу скаргу успішно опубліковано у форум **#{forum_channel.name}**!",
-        ephemeral=True,
-    )
-
-
-@bot.tree.command(
-    name="setup_forum_report",
-    description="Надіслати панель подачі скарг у форум у канал",
-)
-@app_commands.default_permissions(administrator=True)
-async def setup_forum_report(interaction: discord.Interaction):
-  embed = discord.Embed(
-      title="📋 Подача скарг у форум",
-      description=(
-          "Оберіть у меню нижче категорію, щоб подати скаргу через форму та"
-          " автоматично створити тему у відповідному форумі."
-      ),
-      color=discord.Color.dark_red(),
-  )
-  await interaction.channel.send(embed=embed, view=ForumReportView())
-  await interaction.response.send_message(
-      "Панель скарг на форум успішно надіслано!", ephemeral=True
-  )
-
-
-# ==========================================
-# 5. КОМАНДИ МОДЕРАЦІЇ
+# 5. КОМАНДИ МОДЕРАЦІЇ З ЛОГАМИ
 # ==========================================
 
 
@@ -357,9 +295,10 @@ async def ban(
   try:
     await member.ban(reason=reason)
     await interaction.response.send_message(
-        f"✅ Користувача {member.mention} успішно забанено. Причина: {reason}",
-        ephemeral=True,
+        f"✅ Користувача {member.mention} успішно забанено.", ephemeral=True
     )
+    log_text = f"🔨 Модератор {interaction.user.mention} забанив {member.mention}.\n📝 **Причина:** {reason}"
+    await send_punishment_log(interaction.guild, log_text)
   except Exception as e:
     await interaction.response.send_message(
         f"❌ Не вдалося забанити гравця: `{e}`", ephemeral=True
@@ -378,10 +317,10 @@ async def mute(
   duration = discord.utils.utcnow() + discord.timedelta(minutes=minutes)
   await member.timeout(duration, reason=reason)
   await interaction.response.send_message(
-      f"🔇 Учаснику {member.mention} видано мут на {minutes} хв. Причина:"
-      f" {reason}",
-      ephemeral=True,
+      f"🔇 Учаснику {member.mention} видано мут на {minutes} хв.", ephemeral=True
   )
+  log_text = f"🔨 Модератор {interaction.user.mention} замутив {member.mention} на **{minutes} хв.**\n📝 **Причина:** {reason}"
+  await send_punishment_log(interaction.guild, log_text)
 
 
 @bot.tree.command(name="unmute", description="Зняти тайм-аут з учасника")
@@ -408,10 +347,10 @@ async def warn(
 
   count = len(warnings_db[user_id])
   await interaction.response.send_message(
-      f"⚠️ Учаснику {member.mention} видано попередження. Всього варнів:"
-      f" {count}. Причина: {reason}",
-      ephemeral=True,
+      f"⚠️ Учаснику {member.mention} видано попередження (всього: {count}).", ephemeral=True
   )
+  log_text = f"⚠️ Модератор {interaction.user.mention} видав попередження гравцю {member.mention} (Всього: {count}).\n📝 **Причина:** {reason}"
+  await send_punishment_log(interaction.guild, log_text)
 
 
 @bot.tree.command(name="warnlog", description="Переглянути історію варнів гравця")
