@@ -5,7 +5,7 @@ from discord.ext import commands
 from dotenv import load_dotenv
 from google import genai
 
-# Завантажуємо змінні середовища з файлу .env на хостингу
+# Завантажуємо змінні середовища з файлу .env
 load_dotenv()
 
 intents = discord.Intents.default()
@@ -16,7 +16,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 warnings_db = {}
 
-# Ініціалізація клієнта Gemini з безпечним читанням ключа
+# Ініціалізація клієнта Gemini з актуальною моделлю
 gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 
@@ -53,7 +53,7 @@ async def say(
 
 
 # ==========================================
-# 2. СИСТЕМА ТІКЕТІВ З КНОПКАМИ
+# 2. СИСТЕМА ТІКЕТІВ З КНОПКАМИ ТА ПЕРЕДАЧЕЮ
 # ==========================================
 
 
@@ -87,21 +87,61 @@ class TicketView(discord.ui.View):
         channel_name, overwrites=overwrites
     )
 
-    close_view = TicketCloseView()
+    manage_view = TicketManageView()
     await ticket_channel.send(
         f"Вітаю, {interaction.user.mention}! Опишіть вашу проблему."
-        " Адміністрація скоро відповість.",
-        view=close_view,
+        " Модерація скоро відповість.",
+        view=manage_view,
     )
     await interaction.response.send_message(
         f"Ваш тікет успішно створено: {ticket_channel.mention}!", ephemeral=True
     )
 
 
-class TicketCloseView(discord.ui.View):
+class TicketManageView(discord.ui.View):
 
   def __init__(self):
     super().__init__(timeout=None)
+
+  @discord.ui.button(
+      label="Передати модератору",
+      style=discord.ButtonStyle.blurple,
+      custom_id="transfer_moderator",
+      emoji="🛡️",
+  )
+  async def transfer_moderator(
+      self, interaction: discord.Interaction, button: discord.ui.Button
+  ):
+    # Шукаємо роль модератора (можна змінити назву на ту, яка у вас на сервері)
+    role = discord.utils.get(interaction.guild.roles, name="Команда Модерації (Discord)")
+    role_mention = role.mention if role else "@Команда Модерації (Discord)"
+    
+    await interaction.channel.send(
+        f"📢 Увага! Тікет передано на розгляд модераторам: {role_mention}"
+    )
+    await interaction.response.send_message(
+        "✅ Тікет успішно передано модераторам!", ephemeral=True
+    )
+
+  @discord.ui.button(
+      label="Передати вищому модератору",
+      style=discord.ButtonStyle.grey,
+      custom_id="transfer_higher_mod",
+      emoji="⭐",
+  )
+  async def transfer_higher_mod(
+      self, interaction: discord.Interaction, button: discord.ui.Button
+  ):
+    # Шукаємо ролі вищого складу (Discord Manager / Staff тощо)
+    role = discord.utils.get(interaction.guild.roles, name="Discord Manager")
+    role_mention = role.mention if role else "@Discord Manager"
+
+    await interaction.channel.send(
+        f"🚨 Увага! Тікет передано вищому складу (Discord Manager): {role_mention}"
+    )
+    await interaction.response.send_message(
+        "✅ Тікет успішно передано вищому модератору!", ephemeral=True
+    )
 
   @discord.ui.button(
       label="Закрити тікет",
@@ -158,8 +198,12 @@ async def report(interaction: discord.Interaction, *, reason: str):
   embed.add_field(name="Причина / Ситуація", value=reason, inline=False)
   embed.set_footer(text="Модератори отримали сповіщення.")
 
+  # Тегаємо конкретну роль замість @here (як на вашому скріншоті)
+  role = discord.utils.get(interaction.guild.roles, name="Команда Модерації (Discord)")
+  role_mention = role.mention if role else "@Команда Модерації (Discord)"
+
   await interaction.channel.send(
-      "@here Увага, зафіксовано виклик модерації!", embed=embed
+      f"{role_mention} Увага, зафіксовано виклик модерації!", embed=embed
   )
   await interaction.response.send_message(
       "✅ Виклик модераторів успішно надіслано!", ephemeral=True
@@ -406,7 +450,7 @@ async def ai_chat(interaction: discord.Interaction, *, prompt: str):
 
   try:
     response = gemini_client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-3.8-flash",
         contents=prompt,
     )
 
