@@ -2,7 +2,11 @@ import os
 import discord
 from discord import app_commands
 from discord.ext import commands
+from dotenv import load_dotenv
 from google import genai
+
+# Завантажуємо змінні середовища з файлу .env на хостингу
+load_dotenv()
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -12,7 +16,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 warnings_db = {}
 
-# Ініціалізація клієнта Gemini з актуальною моделлю
+# Ініціалізація клієнта Gemini з безпечним читанням ключа
 gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 
@@ -402,7 +406,7 @@ async def ai_chat(interaction: discord.Interaction, *, prompt: str):
 
   try:
     response = gemini_client.models.generate_content(
-        model="gemini-3.8-flash",
+        model="gemini-2.5-flash",
         contents=prompt,
     )
 
